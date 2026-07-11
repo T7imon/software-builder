@@ -1,6 +1,6 @@
 # Builder Platform V1 Requirements
 
-Status: `PROPOSED - ARCHITECTURE APPROVAL REQUIRED`
+Status: `OWNER APPROVED - FOUNDATION ACTIVE`
 
 Authoritative inputs:
 
@@ -10,18 +10,18 @@ Authoritative inputs:
 - Completed Planner package
 - Reconciled Architect, Security, and Legal DE/EU reviews
 
-Current gates remain unchanged:
+Current authoritative gates:
 
 | Gate | Value |
 |---|---|
-| Current milestone | `PLANNING` |
-| Architecture approved | `NO` |
-| Implementation enabled | `NO` |
+| Current milestone | `FOUNDATION` |
+| Architecture approved | `YES` |
+| Implementation enabled | `YES` |
 | GitHub integration enabled | `NO` |
 | Automatic project execution | `NO` |
 | Production deployment | `DISABLED` |
 
-This document authorizes no application implementation, workspace creation, GitHub action, agent execution, or deployment.
+This document does not itself execute or authorize a code change. `FOUNDATION` work requires a separate one-task implementation workflow. Workspace creation, GitHub integration, automatic project execution, and production remain unavailable until their own gates permit them.
 
 ## 1. Product Definition
 
@@ -110,7 +110,7 @@ These requirements close design gaps identified by the Security review. They are
 
 ## 6. Reconciled Legal Requirements
 
-Legal review status is `PASS_WITH_REQUIREMENTS` for architecture planning only.
+Legal successor status is `PASS_WITH_REQUIREMENTS` for the owner-approved V1 architecture. Each later external-processing, implementation, and release requirement remains a fail-closed milestone gate.
 
 | ID | Requirement |
 |---|---|

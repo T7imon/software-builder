@@ -4,7 +4,7 @@ Stand: 11.07.2026
 
 Gesamtstatus: `PASS_WITH_REQUIREMENTS`
 
-Der Status gilt ausschließlich für die weitere Architekturplanung. Er ist keine Freigabe für `Architecture approved`, Implementierung, GitHub, automatische Projektausführung, Veröffentlichung oder Produktion. Diese Funktionen bleiben nach `PROJECT_STATE.md` deaktiviert.
+Der Status ist die rechtliche Planungsbewertung der vom Owner genehmigten V1-Architektur. `PROJECT_STATE.md` erlaubt ausschließlich den Meilenstein `FOUNDATION`; diese Dokumentationsprüfung erlaubt selbst keine Codeänderung. GitHub, automatische Projektausführung, Veröffentlichung und Produktion bleiben deaktiviert. Jede spätere externe Verarbeitung oder Bereitstellung benötigt weiterhin ihr eigenes wirksames Legal-/Provider-Gate.
 
 ## 1. Hinweis und Prüfungsgrenze
 
@@ -275,4 +275,4 @@ Diese Risiken dürfen nicht durch Owner-Freigabe oder `ManualDecision` aufgehobe
 
 ## 12. Abschluss
 
-Die Legal-DE/EU-Prüfung ist für die Architekturplanung abgeschlossen. Status bleibt `PASS_WITH_REQUIREMENTS`. Vor Architecture Approval sind die M-000-Anforderungen zuzuweisen; vor jeder externen Verarbeitung oder Veröffentlichung müssen die jeweils einschlägigen Ledger-Einträge evidenzbasiert geschlossen sein.
+Die Legal-DE/EU-Prüfung der genehmigten V1-Architektur ist abgeschlossen. Status bleibt `PASS_WITH_REQUIREMENTS`; die M-000-Anforderungen sind zugewiesen und akzeptiert. Vor jeder externen Verarbeitung oder Veröffentlichung müssen die jeweils einschlägigen Ledger-Einträge evidenzbasiert geschlossen sein.

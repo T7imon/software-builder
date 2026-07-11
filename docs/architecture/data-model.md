@@ -1,8 +1,8 @@
 # Builder Platform V1 Data Model
 
-Status: `PROPOSED`
+Status: `OWNER APPROVED FOUNDATION BASELINE`
 
-This is a logical relational model and authorizes no schema implementation.
+This is the approved logical relational model for `FOUNDATION`. It does not itself perform or authorize a code change; implementation occurs only through a separate one-task workflow.
 
 The selected reversible MVP physical mapping is PostgreSQL 18 for control state and jobs, a local encrypted content-addressed object store, a DPAPI-backed local `SecretBrokerPort`, QEMU/WHPX workspace handles, and encrypted restic snapshots in an approved S3-compatible EU bucket. The logical model remains provider-neutral.
 

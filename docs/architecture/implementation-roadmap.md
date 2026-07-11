@@ -1,8 +1,8 @@
 # Builder Platform V1 Implementation Roadmap
 
-Status: `PLANNING ONLY - IMPLEMENTATION NOT ENABLED`
+Status: `FOUNDATION AUTHORIZED - APPLICATION CODE OUT OF SCOPE FOR THIS REVIEW`
 
-This roadmap sequences future work. It does not authorize application code. Only one milestone may be implemented at a time after both `Architecture approved: YES` and `Implementation enabled: YES` are explicitly recorded.
+This roadmap sequences future work. `PROJECT_STATE.md` records architecture and implementation authorization for the single active `FOUNDATION` milestone. This review changes documentation only and authorizes no application-code change. GitHub, automatic project execution, and production remain disabled.
 
 ## 1. Current Position
 
@@ -15,8 +15,8 @@ This roadmap sequences future work. It does not authorize application code. Only
 - Selected operating profile: private owner-only use, local Windows host, controlled OpenAI processing, dedicated private GitHub organization, local passkey authentication, encrypted EU cloud backup.
 - The instruction to fix all named planning problems supersedes the earlier no-login choice. D-020 now uses Windows Hello plus a second independent FIDO2 authenticator.
 - Hardware, provider-contract, conformance, restore, and operational tests remain fail-closed activation evidence. They are not unresolved architecture choices.
-- M-000 planning content: complete and ready for the owner's separate architecture-approval transition.
-- M-001 and later: not authorized.
+- M-000 planning content: complete and owner-approved.
+- M-001 `FOUNDATION`: the sole active authorized milestone. Later milestones are not authorized.
 
 ## 2. Milestone Rules
 
@@ -273,7 +273,7 @@ Security architecture status is `ACCEPTED_WITH_IMPLEMENTATION_GATES`. Each miles
 | M-007 | Current per-revision Legal assessment, four reviews, provenance/SBOM, no self-clear |
 | M-008 | Publication class, recipients, CRA/product/B2C/BFSG/jurisdiction/counsel gates; production still impossible |
 
-Legal remains `PASS_WITH_REQUIREMENTS` for planning only until the applicable evidence ledger is verified.
+Legal status is `PASS_WITH_REQUIREMENTS` for the approved architecture. Each applicable milestone and external-processing gate remains ineffective until its evidence ledger is verified.
 
 ## 6. Original Decision Register
 
@@ -362,14 +362,14 @@ None of these records is a Security or Legal successor review, an architecture a
 
 ## 8. Remaining Gate Order
 
-1. The owner may set `Architecture approved: YES` only in a separate explicit workflow. That transition does not enable implementation, GitHub, execution, external processing, export, or production.
-2. A later explicit workflow may enable implementation and only one milestone after M-000 closes.
-3. Provider-specific OpenAI, GitHub, backup, timestamp, and Object-Lock evidence is required before those separate external-processing gates can become `YES`; a failed or missing check leaves only that capability disabled.
-4. Hardware, VM, SDK, restore, authorization, authentication, and hostile-child conformance tests are milestone acceptance evidence and fail closed without reopening the selected architecture unless an adapter proves infeasible.
+1. Implement only the single active `FOUNDATION` milestone and only through a separately authorized implementation workflow; this documentation review implements no code.
+2. Provider-specific OpenAI, GitHub, backup, timestamp, and Object-Lock evidence is required before those separate external-processing gates can become `YES`; a failed or missing check leaves only that capability disabled.
+3. Hardware, VM, SDK, restore, authorization, authentication, and hostile-child conformance tests are milestone acceptance evidence and fail closed without reopening the selected architecture unless an adapter proves infeasible.
+4. GitHub, automatic execution, external publication, and production remain disabled until their own explicit gates and prerequisites pass.
 
 ## 9. Architecture Approval Checklist
 
-- [ ] Owner records `Architecture approved: YES` in a separate explicit workflow.
+- [x] Owner recorded `Architecture approved: YES` and `Implementation enabled: YES`; `FOUNDATION` is the sole active milestone.
 - [x] All D-001..D-032 have a documented MVP treatment, reason, disadvantage, and migration path.
 - [x] D-020 specifies phishing-resistant WebAuthn, two authenticators, short sessions, CSRF controls, and fresh high-risk reauthentication.
 - [x] QEMU/WHPX, DPAPI/PIV recovery, exact audit-anchor, and exact project-authorization designs are documented; their conformance tests remain milestone gates.
@@ -377,5 +377,5 @@ None of these records is a Security or Legal successor review, an architecture a
 - [x] Security successor verdict is `ACCEPTED_WITH_IMPLEMENTATION_GATES`.
 - [x] Legal successor verdict is `PASS_WITH_REQUIREMENTS`; M-000 is accepted and later evidence gates are assigned.
 - [x] The eight documents pass cross-reference and terminology checks.
-- [x] `PROJECT_STATE.md` remains unchanged; approval requires a separate explicit owner-authorized workflow.
-- [x] Implementation remains disabled until a separate explicit decision.
+- [x] `PROJECT_STATE.md` records `FOUNDATION`; GitHub and automatic execution remain `NO`, production remains `DISABLED`.
+- [x] This review changes documentation only and does not implement application code.

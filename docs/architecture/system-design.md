@@ -1,8 +1,8 @@
 # Builder Platform V1 System Design
 
-Status: `READY FOR OWNER APPROVAL - SECURITY ACCEPTED_WITH_IMPLEMENTATION_GATES - LEGAL PASS_WITH_REQUIREMENTS`
+Status: `OWNER APPROVED FOR FOUNDATION - SECURITY ACCEPTED_WITH_IMPLEMENTATION_GATES - LEGAL PASS_WITH_REQUIREMENTS`
 
-No capability is enabled by this document. `PROJECT_STATE.md` remains authoritative and unchanged.
+This document enables nothing by itself. `PROJECT_STATE.md` is authoritative: architecture and the single `FOUNDATION` implementation milestone are enabled; GitHub and automatic execution are `NO`; production is `DISABLED`. This review authorizes no application-code edit.
 
 ## 1. Design Goals
 
@@ -86,7 +86,7 @@ This is preferred to early microservices because repair counters, unique approva
 
 ### Selected Local Windows MVP Profile
 
-This profile records owner and reversible technical decisions. It remains proposed and unapproved:
+This profile records the binding owner decisions and reversible technical MVP decisions approved as the V1 `FOUNDATION` baseline:
 
 | Concern | Selected MVP treatment |
 |---|---|

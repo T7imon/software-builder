@@ -1,10 +1,10 @@
 # Builder Platform V1 Workflow State Machine
 
-Status: `PROPOSED - ALL RUNTIME GATES REMAIN DISABLED`
+Status: `OWNER APPROVED FOUNDATION BASELINE - GITHUB AND AUTOMATIC EXECUTION DISABLED`
 
 ## 1. State-Machine Rules
 
-1. The relational domain state is authoritative after the D-001 migration; during planning, `PROJECT_STATE.md` remains authoritative.
+1. `PROJECT_STATE.md` remains authoritative through `FOUNDATION` until the audited D-001 database migration is implemented; afterward relational domain state is authoritative and the file becomes a generated read-only mirror.
 2. Every transition validates actor/workload identity, project context, current state, expected aggregate version, policy version, idempotency key, and evidence freshness.
 3. The same transaction writes aggregate state, counters/leases, audit event, idempotency result, and outbox row.
 4. External I/O occurs only after commit through an `ExternalOperation`.

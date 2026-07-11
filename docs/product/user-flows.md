@@ -1,6 +1,6 @@
 # Builder Platform V1 User Flows
 
-Status: `PROPOSED - NO EXECUTION AUTHORIZED`
+Status: `OWNER APPROVED FOUNDATION BASELINE - GITHUB AND AUTOMATIC EXECUTION DISABLED`
 
 The V1 human actor is the sole Platform Owner. Agent roles are workflow participants, not independent authorities. Every flow fails closed on missing, stale, or conflicting evidence.
 

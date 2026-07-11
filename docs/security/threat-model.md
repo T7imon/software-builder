@@ -4,7 +4,7 @@ Review date: 2026-07-11
 
 Security status: `ACCEPTED_WITH_IMPLEMENTATION_GATES`
 
-This is a design review, not a certification or implementation test result. Architecture approval, implementation, GitHub, automatic execution, and publication remain disabled. Any unresolved critical finding blocks publication.
+This is a design review, not a certification or implementation test result. The owner has approved the architecture and the `FOUNDATION` milestone. GitHub, automatic execution, publication, and production remain disabled. Each later capability stays fail closed until its listed implementation and activation evidence passes; any unresolved critical finding blocks publication.
 
 ## 1. Executive Verdict
 
