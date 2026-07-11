@@ -1,0 +1,19 @@
+export const WORKFLOW_STATUSES = [
+  "REQUESTED",
+  "DENIED",
+  "AUTHORIZED",
+  "QUEUED",
+  "CLAIMED",
+  "RUNNING",
+  "INFRA_RETRY",
+  "INFRA_FAILED",
+  "CANCELLING",
+  "CANCELLED",
+  "CANCEL_STUCK",
+  "AWAITING_OBLIGATIONS",
+  "COMPLETED",
+  "REPAIR_SCHEDULED",
+  "STOPPED",
+] as const;
+
+export type WorkflowStatus = (typeof WORKFLOW_STATUSES)[number];
