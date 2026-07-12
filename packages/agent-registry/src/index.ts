@@ -28,3 +28,9 @@ export const AGENT_ROLE_DEFINITIONS: readonly AgentRoleDefinition[] = [
   { role: "security", canWriteApplicationCode: false, requiresExplicitWriteAssignment: false },
   { role: "legal_de", canWriteApplicationCode: false, requiresExplicitWriteAssignment: false },
 ];
+
+/** Registry boundary only. FOUNDATION registers no real agents. */
+export interface AgentRegistryPort {
+  listRoles(): Promise<readonly AgentRoleDefinition[]>;
+  getRole(role: AgentRole): Promise<AgentRoleDefinition | null>;
+}

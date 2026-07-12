@@ -7,6 +7,7 @@
     "packages/*"
   ],
   "scripts": {
+    "postinstall": "npm run build --workspace @software-builder/core",
     "dev": "concurrently --kill-others-on-fail --names web,worker \"npm run dev --workspace @software-builder/web\" \"npm run dev --workspace @software-builder/worker\"",
     "build": "npm run build --workspaces --if-present",
     "lint": "eslint apps packages",

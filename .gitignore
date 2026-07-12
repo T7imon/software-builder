@@ -1,11 +1,45 @@
+# Dependencies and package-manager caches
 node_modules/
 .npm-cache/
+.pnpm-store/
+
+# Framework and compiler output
 .next/
+out/
 dist/
-coverage/
+build/
 *.tsbuildinfo
-.env*
+.turbo/
+
+# Tests and reports
+coverage/
+test-results/
+playwright-report/
+
+# Local environment files (the documented template stays versioned)
+.env
+.env.*
 !.env.example
+
+# Logs and runtime files
+*.log
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.pid
+*.pid.lock
+
+# Editor and operating-system files
+.idea/
+.vscode/
+*.swp
+*.swo
 .DS_Store
 Thumbs.db
+Desktop.ini
+
+# Temporary files
+tmp/
+temp/
+*.tmp
