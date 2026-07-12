@@ -12,7 +12,11 @@
     "build": "npm run build --workspaces --if-present",
     "lint": "eslint apps packages",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:migrate": "npm run build --workspace @software-builder/database && npm run db:migrate --workspace @software-builder/database",
+    "db:reset": "npm run build --workspace @software-builder/database && npm run db:reset --workspace @software-builder/database",
+    "db:seed": "npm run build --workspace @software-builder/database && npm run db:seed --workspace @software-builder/database",
+    "db:provision-runtime": "npm run build --workspace @software-builder/database && npm run db:provision-runtime --workspace @software-builder/database"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

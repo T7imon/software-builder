@@ -23,7 +23,7 @@ Der separate Worker lauscht nur auf `127.0.0.1`. Sein Health-Check ist standardm
 - `apps/web`: Next.js-Webanwendung mit App Router, TypeScript, Tailwind CSS und ESLint
 - `apps/worker`: einfacher Node.js-Worker mit TypeScript
 - `packages/core`: gemeinsame Grundtypen
-- `packages/database`: Schnittstelle für eine spätere Datenbankanbindung
+- `packages/database`: PostgreSQL-18-Persistenz, Migrationen, Repository-Schicht und Tests; siehe `docs/database.md`
 - `packages/agent-runtime`: Schnittstelle für eine spätere Agent-Laufzeit
 - `packages/workflow-engine`: grundlegende Workflow-Statusdefinitionen
 - `packages/agent-registry`: grundlegende Rollendefinitionen
@@ -44,6 +44,6 @@ npm test
 
 ## Bewusste Grenzen des FOUNDATION-Meilensteins
 
-Es gibt noch keine Datenbank, keine Codex-SDK-Integration, keine GitHub-Anmeldung, keine echten Agenten und keine automatische Softwareerstellung. Security- und Legal-Gates besitzen ebenfalls noch keine Auswertung. Die zugehörigen Pakete definieren ausschließlich stabile Grenzen für spätere Meilensteine. Produktionsdeployment ist nicht vorgesehen und bleibt deaktiviert.
+Die PostgreSQL-18-Persistenz des DATABASE-Meilensteins ist vorhanden. Es gibt weiterhin keine Codex-SDK-Integration, keine GitHub-Anmeldung, keine echten Agenten, keinen Workflow-Worker und keine automatische Softwareerstellung. Security- und Legal-Gates besitzen ebenfalls noch keine Auswertung. Produktionsdeployment ist nicht vorgesehen und bleibt deaktiviert.
 
 Die genehmigte Architektur nennt in der älteren Stackentscheidung D-005 `pnpm`. Für diesen FOUNDATION-Schritt wird davon begründet abgewichen, weil die aktuelle, ausdrückliche Nutzeranforderung npm Workspaces verlangt. Die fachliche Architektur und ihre Sicherheitsgrenzen bleiben unverändert; die Architekturdokumente werden dabei nicht umgeschrieben.
