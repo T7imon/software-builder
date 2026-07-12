@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: software_builder
+      POSTGRES_USER: builder_migrator
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the process environment}
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U builder_migrator -d software_builder"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - builder-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  builder-postgres-data:

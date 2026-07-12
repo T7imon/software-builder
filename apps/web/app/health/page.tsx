@@ -5,6 +5,7 @@ export default function HealthPage() {
         <p className="text-sm font-semibold uppercase tracking-widest text-emerald-700">Health</p>
         <h1 className="mt-3 text-3xl font-bold text-slate-950">Software Builder ist bereit</h1>
         <p className="mt-4 text-slate-600">Status: OK</p>
+        <p className="mt-2 text-sm text-slate-500">Maschinenlesbar: /api/health</p>
       </section>
     </main>
   );

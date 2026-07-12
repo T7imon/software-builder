@@ -1,5 +1,5 @@
 {
-  "name": "@software-builder/github",
+  "name": "@software-builder/legal-gates",
   "version": "0.1.0",
   "private": true,
   "type": "module",

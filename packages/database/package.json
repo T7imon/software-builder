@@ -3,12 +3,25 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./dist/index.js" },
+  "dependencies": {
+    "@software-builder/core": "0.1.0",
+    "pg": "^8.16.3"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "db:migrate": "node dist/cli.js migrate",
+    "db:reset": "node dist/cli.js reset",
+    "db:seed": "node dist/cli.js seed",
+    "db:provision-runtime": "node dist/cli.js provision-runtime",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --root ../.. packages/database/src"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.15.5"
   }
 }
