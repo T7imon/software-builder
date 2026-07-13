@@ -15,8 +15,8 @@ const POLICY = "policy-1";
 const NOW = new Date("2026-07-12T12:00:00.000Z");
 const makeByEngine = new WeakMap<WorkflowEngine, ReturnType<typeof createInMemoryWorkflowFixture>>();
 
-function make(workerIdentityVerifier?: WorkerIdentityVerifier) {
-  const fixture = createInMemoryWorkflowFixture({ now: () => new Date(NOW), attesters: { security: "SECURITY", legal: "LEGAL" }, ...(workerIdentityVerifier ? { workerIdentityVerifier } : {}) });
+function make(workerIdentityVerifier?: WorkerIdentityVerifier, now:()=>Date=()=>new Date(NOW)) {
+  const fixture = createInMemoryWorkflowFixture({ now, attesters: { security: "SECURITY", legal: "LEGAL" }, ...(workerIdentityVerifier ? { workerIdentityVerifier } : {}) });
   const engine = new WorkflowEngine(fixture.repository); makeByEngine.set(engine, fixture);
   return { ...fixture, engine };
 }
@@ -140,6 +140,20 @@ describe("repository transaction integration", () => {
       engine.claimJob({ ...request, workerId: "worker-3", idempotencyKey: "claim-3" }),
     ]);
     expect(competing.every((result) => result.status === "rejected")).toBe(true);
+  });
+
+  it("fences a stale worker after lease recovery with a monotonically higher token",async()=>{
+    let current=new Date(NOW);const {engine,trustedGateIngestor}=make(undefined,()=>new Date(current));
+    const started=await createJob(engine,trustedGateIngestor);const firstRequest=claim(started.job!.id,{leaseDurationMs:1_000});
+    const first=await engine.claimJob(firstRequest);expect(first.fencingToken).toBe(1);
+    const staleHeartbeat={jobId:first.id,projectId:first.projectId,expectedAggregateVersion:first.aggregateVersion,expectedRevisionDigest:first.revisionDigest,workerId:"worker-1",claimIdempotencyKey:firstRequest.idempotencyKey,idempotencyKey:"stale-heartbeat-replay",fencingToken:first.fencingToken!,extendLeaseByMs:1_000};
+    await engine.heartbeatJob(staleHeartbeat);
+    current=new Date(NOW.getTime()+2_000);
+    const secondRequest={...firstRequest,workerId:"worker-2",idempotencyKey:"claim-recovery",leaseDurationMs:1_000};
+    const second=await engine.claimJob(secondRequest);expect(second.fencingToken).toBeGreaterThan(first.fencingToken!);
+    await expect(engine.heartbeatJob(staleHeartbeat)).rejects.toMatchObject({code:"JOB_NOT_ALLOWED"});
+    await expect(engine.heartbeatJob({jobId:first.id,projectId:first.projectId,expectedAggregateVersion:first.aggregateVersion,expectedRevisionDigest:first.revisionDigest,workerId:"worker-1",claimIdempotencyKey:firstRequest.idempotencyKey,idempotencyKey:"stale-heartbeat",fencingToken:first.fencingToken!,extendLeaseByMs:1_000})).rejects.toMatchObject({code:"JOB_NOT_ALLOWED"});
+    await expect(engine.heartbeatJob({jobId:second.id,projectId:second.projectId,expectedAggregateVersion:second.aggregateVersion,expectedRevisionDigest:second.revisionDigest,workerId:"worker-2",claimIdempotencyKey:secondRequest.idempotencyKey,idempotencyKey:"fresh-heartbeat",fencingToken:second.fencingToken!,extendLeaseByMs:1_000})).resolves.toMatchObject({fencingToken:second.fencingToken});
   });
 
   it("deduplicates heartbeat and completion without extending twice or appending duplicate audit", async () => {

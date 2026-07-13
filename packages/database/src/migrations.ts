@@ -7,7 +7,12 @@ import type { Pool, PoolClient } from "pg";
 const migrationDirectory = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 const lockKey = "software-builder:migrations";
 const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex");
-async function verifyMaintenanceIdentity(client:PoolClient):Promise<void>{const row=(await client.query<{current_user:string;runtime_member:boolean}>("SELECT current_user,pg_has_role(current_user,'builder_runtime','MEMBER') runtime_member")).rows[0];if(row?.current_user!=="builder_migrator"||row.runtime_member)throw new Error("Migration erfordert die separate builder_migrator-Identitaet.");}
+async function verifyMaintenanceIdentity(client:PoolClient):Promise<void>{const row=(await client.query<{current_user:string;runtime_member:boolean}>(`SELECT current_user,EXISTS(
+  SELECT 1 FROM pg_auth_members membership
+  JOIN pg_roles granted_role ON granted_role.oid=membership.roleid
+  JOIN pg_roles login_role ON login_role.oid=membership.member
+  WHERE granted_role.rolname='builder_runtime' AND login_role.rolname=current_user
+) runtime_member`)).rows[0];if(row?.current_user!=="builder_migrator"||row.runtime_member)throw new Error("Migration erfordert die separate builder_migrator-Identitaet.");}
 
 async function verifyWorkersStopped(client: PoolClient): Promise<void> {
   const active = await client.query<{ count: string }>(`SELECT count(*) AS count FROM pg_stat_activity

@@ -209,10 +209,11 @@ export interface WorkflowJob {
   readonly leaseOwner?: string;
   readonly claimIdempotencyKey?: string;
   readonly leaseExpiresAt?: Date;
+  readonly fencingToken?: number;
   readonly completedAt?: Date;
   readonly cancelledAt?: Date;
 }
-export type JobEventType = "CLAIMED" | "HEARTBEAT" | "COMPLETED" | "CANCELLING" | "CANCELLED";
+export type JobEventType = "CLAIMED" | "AUTHORIZED" | "HEARTBEAT" | "COMPLETED" | "CANCELLING" | "CANCELLED";
 export interface JobAuditEvent {
   readonly id: string;
   readonly projectId: string;
@@ -271,6 +272,7 @@ export interface OwnedJobRequest {
   readonly workerId: string;
   readonly claimIdempotencyKey: string;
   readonly idempotencyKey: string;
+  readonly fencingToken?: number;
 }
 export interface HeartbeatJobRequest extends OwnedJobRequest { readonly extendLeaseByMs: number; }
 export interface ConfirmJobTerminationRequest extends OwnedJobRequest { readonly terminationEvidence: TerminationEvidence; }
@@ -286,10 +288,10 @@ export interface LegalRequirementDecision {
   readonly decision: "VERIFIED" | "REJECTED"; readonly evidence: ImmutableEvidenceReference; readonly decidedAt: Date;
 }
 export type CounselDecisionInput = Omit<CounselDecision, "ingestedAt">;
-interface LegalAssessmentAttestation { readonly assessment: LegalAssessmentInput; readonly legalIdentity: string; readonly proof: string; }
-interface LegalRequirementSubmissionAttestation { readonly submission: LegalRequirementSubmission; readonly submitterIdentity: string; readonly proof: string; }
-interface LegalRequirementDecisionAttestation { readonly decision: LegalRequirementDecision; readonly legalIdentity: string; readonly proof: string; }
-interface CounselDecisionAttestation { readonly decision: CounselDecisionInput; readonly proof: string; }
+export interface LegalAssessmentAttestation { readonly assessment: LegalAssessmentInput; readonly legalIdentity: string; readonly proof: string; }
+export interface LegalRequirementSubmissionAttestation { readonly submission: LegalRequirementSubmission; readonly submitterIdentity: string; readonly proof: string; }
+export interface LegalRequirementDecisionAttestation { readonly decision: LegalRequirementDecision; readonly legalIdentity: string; readonly proof: string; }
+export interface CounselDecisionAttestation { readonly decision: CounselDecisionInput; readonly proof: string; }
 
 export type WorkflowErrorCode =
   | "PROJECT_NOT_FOUND" | "PROJECT_ALREADY_EXISTS" | "INVALID_TRANSITION"
@@ -401,6 +403,22 @@ interface WorkflowRecord {
   readonly evidenceUsageByDigest: Map<string, string>;
   readonly evidenceSemanticUsage: Set<string>;
   readonly gateSemanticUsage: Set<string>;
+}
+
+export interface WorkflowPersistenceProjection {
+  readonly project: ProjectWorkflow;
+  readonly gates: readonly GateResult[];
+  readonly auditEvents: readonly AuditEvent[];
+  readonly jobs: readonly WorkflowJob[];
+  readonly jobEvents: readonly JobAuditEvent[];
+  readonly holdClearances: readonly VerifiedHoldClearance[];
+  readonly terminationEvidence: readonly VerifiedTerminationEvidence[];
+  readonly legalAssessments: readonly LegalAssessment[];
+  readonly legalRequirements: readonly LegalRequirement[];
+  readonly counselCases: readonly CounselCase[];
+  readonly counselDecisions: readonly CounselDecision[];
+  readonly holds: readonly ProjectHold[];
+  readonly idempotencyRecords: readonly { readonly kind: "TRANSITION" | "JOB"; readonly scopeKey: string; readonly requestHash: string; readonly resultRef: string }[];
 }
 
 export interface WorkflowRepository {
@@ -601,7 +619,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
         ...(frozenRevisionDigest ? { frozenRevisionDigest } : {}), blockReasons: reasons,
       };
       const job: WorkflowJob | undefined = input.startJob ? {
-        id: `${current.projectId}:job:${record.jobs.length + 1}`, projectId: current.projectId, type: input.startJob.type,
+        id: randomUUID(), projectId: current.projectId, type: input.startJob.type,
         phase: input.targetPhase, aggregateVersion: version, revisionDigest: nextRevision, status: "PENDING",
         idempotencyKey: input.idempotencyKey, operationScope, createdAt: occurredAt,
       } : undefined;
@@ -642,16 +660,18 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     return this.withRecord(input.projectId, async (record) => {
       await this.assertTrustedWorker(input.workerId, input.projectId, "CLAIM");
       const replay = beginJobCommand(record, "claim", input.workerId, input.idempotencyKey, input);
-      if (replay) { const current = currentReplayState(record, replay); const replayNow = this.currentTime(); if (current.status === "CLAIMED") enforceRuntimeEvidenceForClaimedJob(record, current, replayNow); assertOperationalEvidence(record, current.revisionDigest, replayNow, [], current.operationScope); return current; }
+      if (replay) { const current=assertCurrentReplayFence(record, replay, input, ["CLAIMED","CANCELLING","CANCELLED"]); const replayNow = this.currentTime(); if(current.status==="CLAIMED")enforceRuntimeEvidenceForClaimedJob(record, current, replayNow); assertOperationalEvidence(record, current.revisionDigest, replayNow, [], current.operationScope); return current; }
       if (record.jobs.some((candidate) => candidate.status === "CANCELLING")) throw new WorkflowError("JOB_NOT_ALLOWED", "Claims sind bis zur bestaetigten Job-Beendigung gesperrt.");
       const { index, job } = findJob(record, input.jobId);
       assertRunnableSnapshot(record, job, input);
       assertOperationalEvidence(record, job.revisionDigest, this.currentTime(), [], job.operationScope);
-      if (job.status !== "PENDING") throw new WorkflowError("JOB_NOT_ALLOWED", "Job ist bereits vergeben oder nicht mehr autorisiert.");
+      const expiredClaim = job.status === "CLAIMED" && Boolean(job.leaseExpiresAt && job.leaseExpiresAt <= this.currentTime());
+      if (job.status !== "PENDING" && !expiredClaim) throw new WorkflowError("JOB_NOT_ALLOWED", "Job ist bereits vergeben oder nicht mehr autorisiert.");
       const claimedAt = this.currentTime();
       const claimed: WorkflowJob = {
         ...job, status: "CLAIMED", claimedAt, leaseOwner: input.workerId, claimIdempotencyKey: input.idempotencyKey,
         leaseExpiresAt: new Date(claimedAt.getTime() + input.leaseDurationMs),
+        fencingToken: Math.max(0, ...record.jobs.map((candidate) => candidate.fencingToken ?? 0)) + 1,
       };
       record.jobs[index] = claimed;
       appendJobEvent(record, claimed, "CLAIMED", claimedAt, input.workerId, input.idempotencyKey);
@@ -664,13 +684,16 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     validateOwnedJobRequest(input);
     return this.withRecord(input.projectId, async (record) => {
       await this.assertTrustedWorker(input.workerId, input.projectId, "AUTHORIZE");
+      const replay = beginJobCommand(record, "authorize", input.workerId, input.idempotencyKey, input);
+      if (replay) { assertCurrentReplayFence(record, replay, input, ["CLAIMED"]); const replayNow = this.currentTime(); enforceRuntimeEvidenceForClaimedJob(record, replay, replayNow); assertOperationalEvidence(record, replay.revisionDigest, replayNow, [], replay.operationScope); return replay; }
       const { job } = findJob(record, input.jobId);
       const now = this.currentTime();
       assertClaimedJobOwnership(record, job, input);
       enforceRuntimeEvidenceForClaimedJob(record, job, now);
       assertActiveOwnedJob(record, job, input, now);
       assertOperationalEvidence(record, job.revisionDigest, now, [], job.operationScope);
-      return cloneJob(job);
+      appendJobEvent(record, job, "AUTHORIZED", now, input.workerId, input.idempotencyKey);
+      return finishJobCommand(record, "authorize", input.workerId, input.idempotencyKey, input, job);
     });
   }
 
@@ -681,7 +704,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     return this.withRecord(input.projectId, async (record) => {
       await this.assertTrustedWorker(input.workerId, input.projectId, "HEARTBEAT");
       const replay = beginJobCommand(record, "heartbeat", input.workerId, input.idempotencyKey, input);
-      if (replay) { const current = currentReplayState(record, replay); const replayNow = this.currentTime(); if (current.status === "CLAIMED") enforceRuntimeEvidenceForClaimedJob(record, current, replayNow); assertOperationalEvidence(record, current.revisionDigest, replayNow, [], current.operationScope); return current; }
+      if (replay) { assertCurrentReplayFence(record, replay, input, ["CLAIMED"]); const replayNow = this.currentTime(); enforceRuntimeEvidenceForClaimedJob(record, replay, replayNow); assertOperationalEvidence(record, replay.revisionDigest, replayNow, [], replay.operationScope); return replay; }
       const { index, job } = findJob(record, input.jobId);
       const now = this.currentTime();
       assertClaimedJobOwnership(record, job, input);
@@ -701,7 +724,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     return this.withRecord(input.projectId, async (record) => {
       await this.assertTrustedWorker(input.workerId, input.projectId, "COMPLETE");
       const replay = beginJobCommand(record, "complete", input.workerId, input.idempotencyKey, input);
-      if (replay) { const current = currentReplayState(record, replay); const replayNow = this.currentTime(); if (current.status === "CLAIMED") enforceRuntimeEvidenceForClaimedJob(record, current, replayNow); assertOperationalEvidence(record, current.revisionDigest, replayNow, [], current.operationScope); return current; }
+      if (replay) { assertCurrentReplayFence(record, replay, input, ["COMPLETED"]); const replayNow = this.currentTime(); assertOperationalEvidence(record, replay.revisionDigest, replayNow, [], replay.operationScope); return replay; }
       const { index, job } = findJob(record, input.jobId);
       const now = this.currentTime();
       assertClaimedJobOwnership(record, job, input);
@@ -722,9 +745,9 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     return this.withRecord(input.projectId, async (record) => {
       await this.assertTrustedWorker(input.workerId, input.projectId, "TERMINATE");
       const replay = beginJobCommand(record, "confirm-cancel", input.workerId, input.idempotencyKey, input);
-      if (replay) return currentReplayState(record, replay);
+      if (replay) { assertCurrentReplayFence(record, replay, input, ["CANCELLED"]); return replay; }
       const { index, job } = findJob(record, input.jobId);
-      if (job.status !== "CANCELLING" || job.leaseOwner !== input.workerId || job.claimIdempotencyKey !== input.claimIdempotencyKey) {
+      if (job.status !== "CANCELLING" || job.leaseOwner !== input.workerId || job.claimIdempotencyKey !== input.claimIdempotencyKey || input.fencingToken !== undefined && job.fencingToken !== input.fencingToken) {
         throw new WorkflowError("JOB_NOT_ALLOWED", "Nur der Lease-Inhaber darf die Beendigung eines abbrechenden Jobs bestaetigen.");
       }
       const now = this.currentTime();
@@ -861,6 +884,38 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
   readLegalRequirements(projectId: string): Promise<readonly LegalRequirement[]> { return Promise.resolve([...(this.records.get(strictString(projectId, "projectId"))?.legalRequirements.values() ?? [])].map(cloneLegalRequirement)); }
   readCounselCases(projectId: string): Promise<readonly CounselCase[]> { return Promise.resolve([...(this.records.get(strictString(projectId, "projectId"))?.counselCases.values() ?? [])].map(cloneCounselCase)); }
   readProjectHolds(projectId: string): Promise<readonly ProjectHold[]> { return Promise.resolve([...(this.records.get(strictString(projectId, "projectId"))?.holds.values() ?? [])].map(cloneProjectHold)); }
+
+  exportPersistentState(projectId: string): string {
+    const record = this.records.get(strictString(projectId, "projectId"));
+    if (!record) throw new WorkflowError("PROJECT_NOT_FOUND", `Projekt ${projectId} fehlt.`);
+    return JSON.stringify(encodePersistentValue(record));
+  }
+
+  importPersistentState(snapshot: string): void {
+    const decoded = decodePersistentValue(JSON.parse(strictString(snapshot, "snapshot"))) as WorkflowRecord;
+    validateInitialOrStoredRecord(decoded);
+    this.records.set(decoded.project.projectId, decoded);
+  }
+
+  exportPersistenceProjection(projectId: string): WorkflowPersistenceProjection {
+    const record = this.records.get(strictString(projectId, "projectId"));
+    if (!record) throw new WorkflowError("PROJECT_NOT_FOUND", `Projekt ${projectId} fehlt.`);
+    return {
+      project: cloneProject(record.project), gates: [...record.gates.values()].map(cloneGate),
+      auditEvents: record.auditEvents.map(cloneAudit), jobs: record.jobs.map(cloneJob), jobEvents: record.jobEvents.map(cloneJobEvent),
+      holdClearances: [...record.holdClearances.values()].map(cloneVerifiedHoldClearance),
+      terminationEvidence: [...record.terminationEvidence.values()].map(cloneVerifiedTerminationEvidence),
+      legalAssessments: [...record.legalAssessments.values()].map(cloneLegalAssessment),
+      legalRequirements: [...record.legalRequirements.values()].map(cloneLegalRequirement),
+      counselCases: [...record.counselCases.values()].map(cloneCounselCase),
+      counselDecisions: [...record.counselDecisions.values()].map(cloneCounselDecision),
+      holds: [...record.holds.values()].map(cloneProjectHold),
+      idempotencyRecords: [
+        ...[...record.idempotency.entries()].map(([scopeKey,value])=>({kind:"TRANSITION" as const,scopeKey,requestHash:value.requestHash,resultRef:value.result.auditEvent.id})),
+        ...[...record.jobIdempotency.entries()].map(([scopeKey,value])=>({kind:"JOB" as const,scopeKey,requestHash:value.requestHash,resultRef:value.result.id})),
+      ],
+    };
+  }
 
   private currentTime(): Date { const value = new Date(this.now()); if (!Number.isFinite(value.getTime())) throw new WorkflowError("INVALID_REQUEST", "Zeitquelle ist ungueltig."); return value; }
   private async assertTrustedWorker(workerId: string, projectId: string, operation: WorkerOperation): Promise<void> {
@@ -1077,6 +1132,7 @@ function validateOwnedJobRequest(request: OwnedJobRequest) {
   requireText(request.jobId, "jobId"); requireText(request.projectId, "projectId"); requireText(request.workerId, "workerId"); requireText(request.claimIdempotencyKey, "claimIdempotencyKey"); requireText(request.idempotencyKey, "idempotencyKey");
   validateDigest(request.expectedRevisionDigest, "expectedRevisionDigest");
   if (!Number.isSafeInteger(request.expectedAggregateVersion) || request.expectedAggregateVersion < 1) throw new WorkflowError("INVALID_REQUEST", "expectedAggregateVersion ist ungueltig.");
+  if (request.fencingToken !== undefined && (!Number.isSafeInteger(request.fencingToken) || request.fencingToken < 1)) throw new WorkflowError("INVALID_REQUEST", "fencingToken ist ungueltig.");
 }
 function validateDuration(value: number, field: string) { if (!Number.isSafeInteger(value) || value < 1 || value > 86_400_000) throw new WorkflowError("INVALID_REQUEST", `${field} ist ungueltig.`); }
 function resolveAndValidateGates(record: WorkflowRecord, current: ProjectWorkflow, request: TransitionRequest, targetRevision: string, now: Date): GateResult[] {
@@ -1229,11 +1285,11 @@ function assertRunnableSnapshot(record: WorkflowRecord, job: WorkflowJob, reques
 }
 function assertActiveOwnedJob(record: WorkflowRecord, job: WorkflowJob, request: OwnedJobRequest, now: Date) {
   assertRunnableSnapshot(record, job, request);
-  if (job.status !== "CLAIMED" || job.leaseOwner !== request.workerId || job.claimIdempotencyKey !== request.claimIdempotencyKey || !job.leaseExpiresAt || job.leaseExpiresAt <= now) throw new WorkflowError("JOB_NOT_ALLOWED", "Job-Lease ist ungueltig, abgelaufen oder widerrufen.");
+  if (job.status !== "CLAIMED" || job.leaseOwner !== request.workerId || job.claimIdempotencyKey !== request.claimIdempotencyKey || request.fencingToken !== undefined && job.fencingToken !== request.fencingToken || !job.leaseExpiresAt || job.leaseExpiresAt <= now) throw new WorkflowError("JOB_NOT_ALLOWED", "Job-Lease oder Fencing-Token ist ungueltig, abgelaufen oder widerrufen.");
 }
 function assertClaimedJobOwnership(record: WorkflowRecord, job: WorkflowJob, request: OwnedJobRequest) {
   assertRunnableSnapshot(record, job, request);
-  if (job.status !== "CLAIMED" || job.leaseOwner !== request.workerId || job.claimIdempotencyKey !== request.claimIdempotencyKey) throw new WorkflowError("JOB_NOT_ALLOWED", "Nur der aktuelle Lease-Inhaber darf den laufenden Job rechecken.");
+  if (job.status !== "CLAIMED" || job.leaseOwner !== request.workerId || job.claimIdempotencyKey !== request.claimIdempotencyKey || request.fencingToken !== undefined && job.fencingToken !== request.fencingToken) throw new WorkflowError("JOB_NOT_ALLOWED", "Nur der aktuelle Lease-Inhaber mit aktuellem Fencing-Token darf den laufenden Job rechecken.");
 }
 interface ComplianceFailureBinding {
   readonly holdId: string;
@@ -1318,9 +1374,12 @@ function finishJobCommand(record: WorkflowRecord, operation: string, workerId: s
   record.jobIdempotency.set(jobCommandKey(operation, workerId, idempotencyKey), { requestHash: hashCanonical(request), result: cloneJob(result) });
   return cloneJob(result);
 }
-function currentReplayState(record: WorkflowRecord, cached: WorkflowJob): WorkflowJob {
+function assertCurrentReplayFence(record: WorkflowRecord, cached: WorkflowJob, request: { workerId:string; claimIdempotencyKey?:string; fencingToken?:number }, allowedStatuses: readonly JobStatus[]): WorkflowJob {
   const current = record.jobs.find((job) => job.id === cached.id);
   if (!current) throw new WorkflowError("JOB_NOT_ALLOWED", "Idempotenter Replay kann den aktuellen Jobzustand nicht verifizieren.");
+  if (!allowedStatuses.includes(current.status) || current.leaseOwner !== cached.leaseOwner || current.claimIdempotencyKey !== cached.claimIdempotencyKey || current.fencingToken !== cached.fencingToken || current.leaseOwner !== request.workerId || request.claimIdempotencyKey !== undefined && current.claimIdempotencyKey !== request.claimIdempotencyKey || request.fencingToken !== undefined && current.fencingToken !== request.fencingToken) {
+    throw new WorkflowError("JOB_NOT_ALLOWED", "Idempotenter Replay wurde durch eine neuere Lease oder ein neueres Fencing-Token ungueltig.");
+  }
   return cloneJob(current);
 }
 function replayResult(result: Omit<TransitionResult, "duplicate">, jobs: readonly WorkflowJob[]): TransitionResult { if (!result.job) return cloneResult(result, true); const current = jobs.find((job) => job.id === result.job?.id); return cloneResult({ ...result, ...(current ? { job: current } : {}) }, true); }
@@ -1444,6 +1503,32 @@ function assertNoOpenComplianceHolds(record: WorkflowRecord, scope: ComplianceSc
 }
 function clearanceSemanticKey(value: VerifiedHoldClearance) { return hashCanonical({ holdCode: value.holdCode, projectId: value.projectId, scopeType: value.scopeType, scopeId: value.scopeId, sourceRecordType: value.sourceRecordType, sourceRecordId: value.sourceRecordId, clearingAuthority: value.clearingAuthority, authorityId: value.authorityId, subjectRevisionDigest: value.subjectRevisionDigest, evidenceDigest: value.evidenceDigest, evidenceSemantic: value.evidenceRef ? evidenceSemanticKey(value.evidenceRef) : null }); }
 
+type PersistentEncoding = null | boolean | number | string | PersistentEncoding[] | { readonly [key: string]: PersistentEncoding };
+function encodePersistentValue(value: unknown): PersistentEncoding {
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  if (value instanceof Date) return { $date: value.toISOString() };
+  if (value instanceof Map) return { $map: [...value.entries()].map(([key, item]) => [encodePersistentValue(key), encodePersistentValue(item)]) };
+  if (value instanceof Set) return { $set: [...value.values()].map(encodePersistentValue) };
+  if (Array.isArray(value)) return value.map(encodePersistentValue);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined).map(([key, item]) => [key, encodePersistentValue(item)]));
+  throw new WorkflowError("INVALID_REQUEST", "Workflow-Zustand enthaelt einen nicht persistierbaren Wert.");
+}
+function decodePersistentValue(value: PersistentEncoding): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(decodePersistentValue);
+  if ("$date" in value && typeof value.$date === "string") return new Date(value.$date);
+  if ("$map" in value && Array.isArray(value.$map)) return new Map(value.$map.map((entry) => {
+    if (!Array.isArray(entry) || entry.length !== 2) throw new WorkflowError("INVALID_REQUEST", "Persistierte Map ist ungueltig.");
+    return [decodePersistentValue(entry[0]!), decodePersistentValue(entry[1]!)] as const;
+  }));
+  if ("$set" in value && Array.isArray(value.$set)) return new Set(value.$set.map(decodePersistentValue));
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, decodePersistentValue(item)]));
+}
+function validateInitialOrStoredRecord(value: WorkflowRecord): void {
+  if (!value || typeof value !== "object" || !(value.gates instanceof Map) || !(value.idempotency instanceof Map) || !(value.jobIdempotency instanceof Map) || !(value.holds instanceof Map) || !Array.isArray(value.jobs) || !Array.isArray(value.auditEvents)) throw new WorkflowError("INVALID_REQUEST", "Persistierter Workflow-Zustand ist strukturell ungueltig.");
+  requireText(value.project.projectId, "projectId"); validateDigest(value.project.revisionDigest, "revisionDigest");
+}
+
 function cloneReasons(reasons: readonly BlockReason[]): BlockReason[] {
   if (!Array.isArray(reasons)) throw new WorkflowError("INVALID_REQUEST", "blockReasons muss ein Array sein.");
   return reasons.map((reason) => {
@@ -1469,6 +1554,7 @@ function cloneRequirementDecision(value: LegalRequirementDecision): LegalRequire
 function cloneCounselDecisionInput(value: CounselDecisionInput): CounselDecisionInput { return { id: strictString(value.id, "counselDecision.id"), projectId: strictString(value.projectId, "counselDecision.projectId"), counselCaseId: strictString(value.counselCaseId, "counselDecision.counselCaseId"), predecessorAssessmentId: strictString(value.predecessorAssessmentId, "counselDecision.predecessorAssessmentId"), qualifiedCounselIdentityRef: strictString(value.qualifiedCounselIdentityRef, "counselDecision.qualifiedCounselIdentityRef"), evidence: cloneEvidenceReference(value.evidence), scopeType: strictString(value.scopeType, "counselDecision.scopeType"), scopeId: strictString(value.scopeId, "counselDecision.scopeId"), decidedAt: strictDate(value.decidedAt, "counselDecision.decidedAt") }; }
 function cloneLegalRequirement(value: LegalRequirement): LegalRequirement { return { ...value, createdAt: strictDate(value.createdAt, "requirement.createdAt"), ...(value.submittedEvidence ? { submittedEvidence: cloneEvidenceReference(value.submittedEvidence) } : {}), ...(value.submittedAt ? { submittedAt: strictDate(value.submittedAt, "requirement.submittedAt") } : {}), ...(value.submissionIngestedAt ? { submissionIngestedAt: strictDate(value.submissionIngestedAt, "requirement.submissionIngestedAt") } : {}), ...(value.verificationEvidence ? { verificationEvidence: cloneEvidenceReference(value.verificationEvidence) } : {}), ...(value.verifiedAt ? { verifiedAt: strictDate(value.verifiedAt, "requirement.verifiedAt") } : {}), ...(value.decisionIngestedAt ? { decisionIngestedAt: strictDate(value.decisionIngestedAt, "requirement.decisionIngestedAt") } : {}) }; }
 function cloneCounselCase(value: CounselCase): CounselCase { return { ...value, openedAt: strictDate(value.openedAt, "counselCase.openedAt"), ...(value.closedAt ? { closedAt: strictDate(value.closedAt, "counselCase.closedAt") } : {}) }; }
+function cloneCounselDecision(value: CounselDecision): CounselDecision { return { ...cloneCounselDecisionInput(value), ingestedAt: strictDate(value.ingestedAt, "counselDecision.ingestedAt") }; }
 function cloneProjectHold(value: ProjectHold): ProjectHold { return { ...value, sourceEvidence: cloneEvidenceReference(value.sourceEvidence), createdAt: strictDate(value.createdAt, "hold.createdAt"), ...(value.clearingEvidence ? { clearingEvidence: cloneVerifiedHoldClearance(value.clearingEvidence) } : {}), ...(value.clearedAt ? { clearedAt: strictDate(value.clearedAt, "hold.clearedAt") } : {}) }; }
 const cloneProject = (project: ProjectWorkflow): ProjectWorkflow => ({ projectId: strictString(project.projectId, "projectId"), phase: project.phase, version: project.version, policyVersion: strictString(project.policyVersion, "policyVersion"), revisionDigest: strictString(project.revisionDigest, "revisionDigest"), ...(project.blockedFrom !== undefined ? { blockedFrom: project.blockedFrom } : {}), ...(project.frozenRevisionDigest !== undefined ? { frozenRevisionDigest: strictString(project.frozenRevisionDigest, "frozenRevisionDigest") } : {}), blockReasons: cloneReasons(project.blockReasons) });
 const cloneGateEvidence = (gate: GateEvidence): GateEvidence => ({ id: strictString(gate.id, "gate.id"), projectId: strictString(gate.projectId, "gate.projectId"), name: gate.name, status: gate.status, policyVersion: strictString(gate.policyVersion, "gate.policyVersion"), subjectRevisionDigest: strictString(gate.subjectRevisionDigest, "gate.subjectRevisionDigest"), evidenceDigest: strictString(gate.evidenceDigest, "gate.evidenceDigest"), evaluatedAt: strictDate(gate.evaluatedAt, "gate.evaluatedAt"), validUntil: strictDate(gate.validUntil, "gate.validUntil"), ...(gate.legalStatus !== undefined ? { legalStatus: gate.legalStatus } : {}), ...(gate.legalRequirements !== undefined ? { legalRequirements: gate.legalRequirements.map((item) => ({ id: strictString(item.id, "legalRequirement.id"), status: item.status, subjectRevisionDigest: strictString(item.subjectRevisionDigest, "legalRequirement.subjectRevisionDigest"), evidenceDigest: strictString(item.evidenceDigest, "legalRequirement.evidenceDigest") })) } : {}), ...(gate.customerDataClassification !== undefined ? { customerDataClassification: gate.customerDataClassification } : {}), ...(gate.scopeType !== undefined ? { scopeType: strictString(gate.scopeType, "gate.scopeType") } : {}), ...(gate.scopeId !== undefined ? { scopeId: strictString(gate.scopeId, "gate.scopeId") } : {}) });
@@ -1476,7 +1562,7 @@ const cloneAttestation = (gate: GateAttestation): GateAttestation => ({ ...clone
 const cloneGate = (gate: GateResult): GateResult => ({ ...cloneGateEvidence(gate), trustedAttester: strictString(gate.trustedAttester, "trustedAttester"), attesterRole: gate.attesterRole, ingestedAt: strictDate(gate.ingestedAt, "gate.ingestedAt") });
 const cloneTransitionRequest = (request: TransitionRequest): TransitionRequest => ({ projectId: strictString(request.projectId, "projectId"), targetPhase: request.targetPhase, expectedVersion: request.expectedVersion, expectedRevisionDigest: strictString(request.expectedRevisionDigest, "expectedRevisionDigest"), policyVersion: strictString(request.policyVersion, "policyVersion"), actorId: strictString(request.actorId, "actorId"), reason: strictString(request.reason, "reason"), idempotencyKey: strictString(request.idempotencyKey, "idempotencyKey"), ...(request.gateResultIds !== undefined ? { gateResultIds: strictStringArray(request.gateResultIds, "gateResultIds") } : {}), ...(request.holdClearanceIds !== undefined ? { holdClearanceIds: strictStringArray(request.holdClearanceIds, "holdClearanceIds") } : {}), ...(request.blockReasons !== undefined ? { blockReasons: cloneReasons(request.blockReasons) } : {}), ...(request.newRevisionDigest !== undefined ? { newRevisionDigest: strictString(request.newRevisionDigest, "newRevisionDigest") } : {}), ...(request.startJob !== undefined ? { startJob: cloneStartJob(request.startJob) } : {}), ...(request.operationScope !== undefined ? { operationScope: cloneScope(request.operationScope, "operationScope") } : {}) });
 const cloneClaimRequest = (request: ClaimJobRequest): ClaimJobRequest => ({ jobId: strictString(request.jobId, "jobId"), projectId: strictString(request.projectId, "projectId"), expectedAggregateVersion: request.expectedAggregateVersion, expectedRevisionDigest: strictString(request.expectedRevisionDigest, "expectedRevisionDigest"), workerId: strictString(request.workerId, "workerId"), idempotencyKey: strictString(request.idempotencyKey, "idempotencyKey"), leaseDurationMs: request.leaseDurationMs });
-const cloneOwnedJobRequest = (request: OwnedJobRequest): OwnedJobRequest => ({ jobId: strictString(request.jobId, "jobId"), projectId: strictString(request.projectId, "projectId"), expectedAggregateVersion: request.expectedAggregateVersion, expectedRevisionDigest: strictString(request.expectedRevisionDigest, "expectedRevisionDigest"), workerId: strictString(request.workerId, "workerId"), claimIdempotencyKey: strictString(request.claimIdempotencyKey, "claimIdempotencyKey"), idempotencyKey: strictString(request.idempotencyKey, "idempotencyKey") });
+const cloneOwnedJobRequest = (request: OwnedJobRequest): OwnedJobRequest => ({ jobId: strictString(request.jobId, "jobId"), projectId: strictString(request.projectId, "projectId"), expectedAggregateVersion: request.expectedAggregateVersion, expectedRevisionDigest: strictString(request.expectedRevisionDigest, "expectedRevisionDigest"), workerId: strictString(request.workerId, "workerId"), claimIdempotencyKey: strictString(request.claimIdempotencyKey, "claimIdempotencyKey"), idempotencyKey: strictString(request.idempotencyKey, "idempotencyKey"), ...(request.fencingToken !== undefined ? { fencingToken: request.fencingToken } : {}) });
 const cloneHeartbeatRequest = (request: HeartbeatJobRequest): HeartbeatJobRequest => ({ ...cloneOwnedJobRequest(request), extendLeaseByMs: request.extendLeaseByMs });
 const cloneTerminationEvidence = (value: TerminationEvidence): TerminationEvidence => ({ id: strictString(value.id, "terminationEvidence.id"), evidenceDigest: strictString(value.evidenceDigest, "terminationEvidence.evidenceDigest"), processEndedAt: strictDate(value.processEndedAt, "terminationEvidence.processEndedAt"), mountRevokedAt: strictDate(value.mountRevokedAt, "terminationEvidence.mountRevokedAt"), credentialsRevokedAt: strictDate(value.credentialsRevokedAt, "terminationEvidence.credentialsRevokedAt"), proof: strictString(value.proof, "terminationEvidence.proof") });
 const cloneConfirmJobTerminationRequest = (request: ConfirmJobTerminationRequest): ConfirmJobTerminationRequest => ({ ...cloneOwnedJobRequest(request), terminationEvidence: cloneTerminationEvidence(request.terminationEvidence) });

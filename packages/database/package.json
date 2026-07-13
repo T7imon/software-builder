@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@software-builder/core": "0.1.0",
+    "@software-builder/workflow-engine": "0.1.0",
     "pg": "^8.16.3"
   },
   "exports": {
@@ -19,7 +20,7 @@
     "db:provision-runtime": "node dist/cli.js provision-runtime",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --root ../.. packages/database/src"
+    "test": "npm run build && vitest run --root ../.. packages/database/src"
   },
   "devDependencies": {
     "@types/pg": "^8.15.5"
