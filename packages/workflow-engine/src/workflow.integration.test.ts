@@ -156,6 +156,44 @@ describe("repository transaction integration", () => {
     await expect(engine.heartbeatJob({jobId:second.id,projectId:second.projectId,expectedAggregateVersion:second.aggregateVersion,expectedRevisionDigest:second.revisionDigest,workerId:"worker-2",claimIdempotencyKey:secondRequest.idempotencyKey,idempotencyKey:"fresh-heartbeat",fencingToken:second.fencingToken!,extendLeaseByMs:1_000})).resolves.toMatchObject({fencingToken:second.fencingToken});
   });
 
+  it.each([
+    ["AUTHORIZE", -1, true], ["AUTHORIZE", 0, false], ["AUTHORIZE", 1, false],
+    ["HEARTBEAT", -1, true], ["HEARTBEAT", 0, false], ["HEARTBEAT", 1, false],
+  ] as const)("revalidates %s replay at lease boundary offset %d",async(operation,offset,allowed)=>{
+    let current=new Date(NOW);const fixture=make(undefined,()=>new Date(current));
+    const started=await createJob(fixture.engine,fixture.trustedGateIngestor);
+    const claimRequest=claim(started.job!.id,{leaseDurationMs:1_000,idempotencyKey:`boundary-claim-${operation}-${offset}`});
+    const claimed=await fixture.engine.claimJob(claimRequest);
+    const owned={jobId:claimed.id,projectId:claimed.projectId,expectedAggregateVersion:claimed.aggregateVersion,expectedRevisionDigest:claimed.revisionDigest,workerId:claimRequest.workerId,claimIdempotencyKey:claimRequest.idempotencyKey,idempotencyKey:`boundary-${operation}-${offset}`,fencingToken:claimed.fencingToken!};
+    const first=operation==="AUTHORIZE"?await fixture.engine.authorizeJobWork(owned):await fixture.engine.heartbeatJob({...owned,extendLeaseByMs:1_000});
+    const eventCount=(await fixture.engine.getJobEvents("project-1")).length;
+    current=new Date(first.leaseExpiresAt!.getTime()+offset);
+    const replay=operation==="AUTHORIZE"?fixture.engine.authorizeJobWork(owned):fixture.engine.heartbeatJob({...owned,extendLeaseByMs:1_000});
+    if(allowed)await expect(replay).resolves.toEqual(first);
+    else await expect(replay).rejects.toMatchObject({code:"JOB_NOT_ALLOWED"});
+    expect(await fixture.engine.getJobEvents("project-1")).toHaveLength(eventCount);
+    expect((await fixture.engine.getJobs("project-1"))[0]?.leaseExpiresAt).toEqual(first.leaseExpiresAt);
+  });
+
+  it("requires reclaim and rejects old worker, fence and idempotency keys after expiry",async()=>{
+    let current=new Date(NOW);const fixture=make(undefined,()=>new Date(current));
+    const started=await createJob(fixture.engine,fixture.trustedGateIngestor);
+    const firstClaim=claim(started.job!.id,{leaseDurationMs:1_000,idempotencyKey:"expiry-generation-1"});
+    const first=await fixture.engine.claimJob(firstClaim);
+    const oldAuthorize={jobId:first.id,projectId:first.projectId,expectedAggregateVersion:first.aggregateVersion,expectedRevisionDigest:first.revisionDigest,workerId:firstClaim.workerId,claimIdempotencyKey:firstClaim.idempotencyKey,idempotencyKey:"old-authorize-key",fencingToken:first.fencingToken!};
+    const oldHeartbeat={...oldAuthorize,idempotencyKey:"old-heartbeat-key",extendLeaseByMs:1_000};
+    await fixture.engine.authorizeJobWork(oldAuthorize);await fixture.engine.heartbeatJob(oldHeartbeat);
+    current=new Date(first.leaseExpiresAt!.getTime()+1);
+    await expect(fixture.engine.authorizeJobWork(oldAuthorize)).rejects.toMatchObject({code:"JOB_NOT_ALLOWED"});
+    await expect(fixture.engine.heartbeatJob(oldHeartbeat)).rejects.toMatchObject({code:"JOB_NOT_ALLOWED"});
+    const secondClaim={...firstClaim,workerId:"worker-2",idempotencyKey:"expiry-generation-2"};
+    const second=await fixture.engine.claimJob(secondClaim);expect(second.fencingToken).toBeGreaterThan(first.fencingToken!);
+    await expect(fixture.engine.authorizeJobWork(oldAuthorize)).rejects.toMatchObject({code:"JOB_NOT_ALLOWED"});
+    await expect(fixture.engine.heartbeatJob(oldHeartbeat)).rejects.toMatchObject({code:"JOB_NOT_ALLOWED"});
+    await expect(fixture.engine.authorizeJobWork({...oldAuthorize,workerId:"worker-2",claimIdempotencyKey:secondClaim.idempotencyKey})).rejects.toMatchObject({code:"JOB_NOT_ALLOWED"});
+    await expect(fixture.engine.authorizeJobWork({...oldAuthorize,workerId:"worker-2",claimIdempotencyKey:secondClaim.idempotencyKey,fencingToken:second.fencingToken!,idempotencyKey:"generation-2-authorize"})).resolves.toMatchObject({fencingToken:second.fencingToken});
+  });
+
   it("deduplicates heartbeat and completion without extending twice or appending duplicate audit", async () => {
     const { engine, trustedGateIngestor } = make();
     const started = await createJob(engine, trustedGateIngestor);

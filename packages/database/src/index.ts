@@ -4,6 +4,15 @@ import type { ProjectId } from "@software-builder/core";
 import type { ProjectWorkflow, WorkflowPersistenceProjection } from "@software-builder/workflow-engine";
 import type { BootstrapCapability, BootstrapCapabilityVerifier, BuilderProject, CommandEnvelope, CommandResult, CreateProjectInput, EntityMutation, ProjectCapability, ProjectCapabilityVerifier, ProjectContextIssuer, TaskRecord, VerifiedProjectCapability } from "./types.js";
 
+export interface WorkflowLeaseGuard {
+  readonly jobId: string;
+  readonly workerId: string;
+  readonly claimIdempotencyKey: string;
+  readonly fencingToken: number;
+  readonly allowedStatuses: readonly string[];
+}
+export type WorkflowLeaseGuardResult = "VALID" | "VERSION_CONFLICT" | "LEASE_INVALID";
+
 export * from "./capabilities.js";
 export * from "./types.js";
 export * from "./workflow-repository.js";
@@ -204,23 +213,35 @@ export class PostgresDatabase {
     });
   }
 
-  async readWorkflowState(capability: ProjectCapability): Promise<{ readonly snapshot:string; readonly storageVersion:number }|null> {
+  async readWorkflowState(capability: ProjectCapability): Promise<{ readonly snapshot:string; readonly storageVersion:number; readonly databaseNow:Date }|null> {
     return this[readSession](capability,"workflow_state:read",async(session)=>{
-      const row=(await session.query<{state_snapshot:unknown;storage_version:string}>("SELECT state_snapshot,storage_version FROM builder.workflow_aggregates WHERE project_id=$1",[session.projectId])).rows[0];
-      return row?{snapshot:JSON.stringify(row.state_snapshot),storageVersion:Number(row.storage_version)}:null;
+      const row=(await session.query<{state_snapshot:unknown;storage_version:string;database_now:Date}>("SELECT state_snapshot,storage_version,clock_timestamp() database_now FROM builder.workflow_aggregates WHERE project_id=$1",[session.projectId])).rows[0];
+      return row?{snapshot:JSON.stringify(row.state_snapshot),storageVersion:Number(row.storage_version),databaseNow:row.database_now}:null;
     });
   }
 
-  async compareAndSwapWorkflowState(capability: ProjectCapability, expectedStorageVersion:number, snapshot:string, projection:WorkflowPersistenceProjection):Promise<boolean>{
+  async validateWorkflowLease(capability:ProjectCapability,expectedStorageVersion:number,guard:WorkflowLeaseGuard):Promise<WorkflowLeaseGuardResult>{
+    const verified=await this.claim(capability,"workflow_state:append");
+    return this.transaction(verified,async(session)=>{
+      const aggregate=await session.query<{storage_version:string}>("SELECT storage_version FROM builder.workflow_aggregates WHERE project_id=$1 FOR UPDATE",[session.projectId]);
+      if(Number(aggregate.rows[0]?.storage_version)!==expectedStorageVersion)return "VERSION_CONFLICT";
+      return await workflowLeaseIsValid(session,guard)?"VALID":"LEASE_INVALID";
+    });
+  }
+
+  async compareAndSwapWorkflowState(capability: ProjectCapability, expectedStorageVersion:number, snapshot:string, projection:WorkflowPersistenceProjection, leaseGuard?:WorkflowLeaseGuard):Promise<WorkflowLeaseGuardResult>{
     validatePersistenceInput(projection.project);
     if(snapshot.length<2||snapshot.length>10_000_000)throw new Error("Workflow-Snapshot ist ungueltig oder zu gross.");
     const verified=await this.claim(capability,"workflow_state:append");
     return this.transaction(verified,async(session)=>{
+      const aggregate=await session.query<{storage_version:string}>("SELECT storage_version FROM builder.workflow_aggregates WHERE project_id=$1 FOR UPDATE",[session.projectId]);
+      if(Number(aggregate.rows[0]?.storage_version)!==expectedStorageVersion)return "VERSION_CONFLICT";
+      if(leaseGuard&&!await workflowLeaseIsValid(session,leaseGuard))return "LEASE_INVALID";
       const updated=await session.query(`UPDATE builder.workflow_aggregates SET phase=$3,aggregate_version=$4,storage_version=storage_version+1,policy_version=$5,revision_digest=$6,state_snapshot=$7::jsonb WHERE project_id=$1 AND storage_version=$2`,[session.projectId,expectedStorageVersion,projection.project.phase,projection.project.version,projection.project.policyVersion,projection.project.revisionDigest,snapshot]);
-      if(updated.rowCount!==1)return false;
+      if(updated.rowCount!==1)return "VERSION_CONFLICT";
       const emitted=await persistWorkflowProjection(session,projection);
       if(emitted===0)await appendWorkflowStateMutation(session,verified.subject,snapshot,projection);
-      return true;
+      return "VALID";
     });
   }
 
@@ -267,6 +288,13 @@ async function applyMutation(session: ProjectSession, mutation: EntityMutation, 
     case "inbox_event": await session.query(`INSERT INTO builder.inbox_events(id,project_id,consumer_identity,message_id,status) VALUES ($1,$2,$3,$4,$5)`,[id,session.projectId,mutation.consumerIdentity,mutation.messageId,mutation.status]); break;
   }
   return id;
+}
+
+async function workflowLeaseIsValid(session:ProjectSession,guard:WorkflowLeaseGuard):Promise<boolean>{
+  const row=(await session.query<{status:string;lease_owner:string|null;claim_idempotency_key:string|null;fencing_token:string|null;lease_active:boolean}>(`SELECT status,lease_owner,claim_idempotency_key,fencing_token,
+    lease_expires_at IS NOT NULL AND lease_expires_at > clock_timestamp() lease_active
+    FROM builder.background_jobs WHERE project_id=$1 AND id=$2 FOR UPDATE`,[session.projectId,guard.jobId])).rows[0];
+  return Boolean(row&&guard.allowedStatuses.includes(row.status)&&row.lease_owner===guard.workerId&&row.claim_idempotency_key===guard.claimIdempotencyKey&&Number(row.fencing_token)===guard.fencingToken&&row.lease_active);
 }
 
 const stableUuid=(value:string):string=>{const hex=createHash("sha256").update(value).digest("hex").slice(0,32).split("");hex[12]="4";hex[16]=(["8","9","a","b"] as const)[Number.parseInt(hex[16]!,16)%4]!;return `${hex.slice(0,8).join("")}-${hex.slice(8,12).join("")}-${hex.slice(12,16).join("")}-${hex.slice(16,20).join("")}-${hex.slice(20).join("")}`;};

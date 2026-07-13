@@ -110,7 +110,16 @@ integration("PostgreSQL-18-Integration", () => {
     const fence1=String(first.result.job?.fencingToken);const auth1=[jobId,"worker-1","claim-1",fence1,"authorize-1"];
     const heartbeat1=[jobId,"worker-1","claim-1",fence1,"heartbeat-1","5000"];
     expect((await runProcess("authorize",projectId,auth1)).result.ok).toBe(true);expect((await runProcess("heartbeat",projectId,heartbeat1)).result.ok).toBe(true);
-    const leaseExpiresAt=String((await runProcess("read",projectId)).result.jobs?.[0]?.leaseExpiresAt);await new Promise(resolve=>setTimeout(resolve,Math.max(0,new Date(leaseExpiresAt).getTime()-Date.now()+150)));
+    const leaseExpiresAt=String((await runProcess("read",projectId)).result.jobs?.[0]?.leaseExpiresAt);
+    await admin.query("UPDATE builder.background_jobs SET lease_expires_at=clock_timestamp() WHERE project_id=$1 AND id=$2",[projectId,jobId]);
+    const beforeRejectedReplay=(await admin.query<{storage_version:string;snapshot:string;events:number}>(`SELECT storage_version::text,state_snapshot::text snapshot,
+      (SELECT count(*)::int FROM builder.job_audit_events WHERE project_id=$1) events FROM builder.workflow_aggregates WHERE project_id=$1`,[projectId])).rows[0]!;
+    const boundaryReplays=await Promise.all([runProcess("authorize",projectId,auth1),runProcess("heartbeat",projectId,heartbeat1)]);
+    expect(boundaryReplays.every(item=>!item.result.ok&&item.result.code==="JOB_NOT_ALLOWED")).toBe(true);
+    const afterRejectedReplay=(await admin.query<{storage_version:string;snapshot:string;events:number}>(`SELECT storage_version::text,state_snapshot::text snapshot,
+      (SELECT count(*)::int FROM builder.job_audit_events WHERE project_id=$1) events FROM builder.workflow_aggregates WHERE project_id=$1`,[projectId])).rows[0]!;
+    expect(afterRejectedReplay).toEqual(beforeRejectedReplay);
+    await new Promise(resolve=>setTimeout(resolve,Math.max(0,new Date(leaseExpiresAt).getTime()-Date.now()+150)));
     const second=await runProcess("claim",projectId,[jobId,"worker-2","claim-2","10000"]);expect(second.result.ok).toBe(true);const fence2=String(second.result.job?.fencingToken);expect(Number(fence2)).toBeGreaterThan(Number(fence1));
     expect((await runProcess("authorize",projectId,auth1)).result).toMatchObject({ok:false,code:"JOB_NOT_ALLOWED"});
     expect((await runProcess("heartbeat",projectId,heartbeat1)).result).toMatchObject({ok:false,code:"JOB_NOT_ALLOWED"});

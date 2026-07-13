@@ -685,7 +685,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     return this.withRecord(input.projectId, async (record) => {
       await this.assertTrustedWorker(input.workerId, input.projectId, "AUTHORIZE");
       const replay = beginJobCommand(record, "authorize", input.workerId, input.idempotencyKey, input);
-      if (replay) { assertCurrentReplayFence(record, replay, input, ["CLAIMED"]); const replayNow = this.currentTime(); enforceRuntimeEvidenceForClaimedJob(record, replay, replayNow); assertOperationalEvidence(record, replay.revisionDigest, replayNow, [], replay.operationScope); return replay; }
+      if (replay) { const current=assertCurrentReplayFence(record, replay, input, ["CLAIMED"]); const replayNow = this.currentTime(); assertActiveOwnedJob(record, current, input, replayNow); enforceRuntimeEvidenceForClaimedJob(record, current, replayNow); assertOperationalEvidence(record, current.revisionDigest, replayNow, [], current.operationScope); return replay; }
       const { job } = findJob(record, input.jobId);
       const now = this.currentTime();
       assertClaimedJobOwnership(record, job, input);
@@ -704,7 +704,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     return this.withRecord(input.projectId, async (record) => {
       await this.assertTrustedWorker(input.workerId, input.projectId, "HEARTBEAT");
       const replay = beginJobCommand(record, "heartbeat", input.workerId, input.idempotencyKey, input);
-      if (replay) { assertCurrentReplayFence(record, replay, input, ["CLAIMED"]); const replayNow = this.currentTime(); enforceRuntimeEvidenceForClaimedJob(record, replay, replayNow); assertOperationalEvidence(record, replay.revisionDigest, replayNow, [], replay.operationScope); return replay; }
+      if (replay) { const current=assertCurrentReplayFence(record, replay, input, ["CLAIMED"]); const replayNow = this.currentTime(); assertActiveOwnedJob(record, current, input, replayNow); enforceRuntimeEvidenceForClaimedJob(record, current, replayNow); assertOperationalEvidence(record, current.revisionDigest, replayNow, [], current.operationScope); return replay; }
       const { index, job } = findJob(record, input.jobId);
       const now = this.currentTime();
       assertClaimedJobOwnership(record, job, input);
