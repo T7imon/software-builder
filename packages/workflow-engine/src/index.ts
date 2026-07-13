@@ -227,6 +227,13 @@ export interface JobAuditEvent {
   readonly idempotencyKey?: string;
   readonly terminationEvidenceId?: string;
   readonly terminationEvidenceDigest?: string;
+  readonly complianceFailureBindings?: readonly {
+    readonly holdId: string;
+    readonly reason: string;
+    readonly sourceRecordType: ProjectHold["sourceRecordType"];
+    readonly sourceRecordId: string;
+    readonly evidence: ImmutableEvidenceReference;
+  }[];
   readonly previousHash: string | null;
   readonly eventHash: string;
 }
@@ -502,24 +509,30 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
       record.gates.set(gate.id, cloneGate(gate));
       record.gateSemanticUsage.add(replayKey); record.evidenceUsageById.set(gate.id, `GATE:${gate.name}`); record.evidenceUsageByDigest.set(gate.evidenceDigest, `GATE:${gate.name}`);
       const evidence = gateEvidenceReference(gate, scope);
+      const complianceFailures: ComplianceFailureBinding[] = [];
+      let mustCancelActiveJobs = false;
       if (gate.name === "CUSTOMER_DATA_CLASSIFIED" && (gate.status !== "PASS" || gate.customerDataClassification !== "SYNTHETIC_ONLY")) {
         openPersistentHold(record, "PROHIBITED_DATA_HOLD", "GATE_RESULT", gate.id, evidence, scope, "SECURITY", ingestedAt);
-        cancelActiveJobs(record, ingestedAt);
+        complianceFailures.push(complianceFailureBinding("PROHIBITED_DATA_HOLD", "GATE_RESULT", gate.id, evidence, "Autoritative SYNTHETIC_ONLY-Evidence wurde waehrend des laufenden Jobs advers invalidiert."));
+        mustCancelActiveJobs = true;
       }
       if (gate.name === "SECURITY_REVIEW_PASSED" && gate.status !== "PASS") {
         openPersistentHold(record, "SECURITY_ADVERSE_HOLD", "GATE_RESULT", gate.id, evidence, scope, "SECURITY", ingestedAt);
-        cancelActiveJobs(record, ingestedAt);
+        complianceFailures.push(complianceFailureBinding("SECURITY_ADVERSE_HOLD", "GATE_RESULT", gate.id, evidence, "Autoritative Security-Evidence wurde waehrend des laufenden Jobs advers invalidiert."));
+        mustCancelActiveJobs = true;
       }
       if (gate.name === "LEGAL_REVIEW_PASSED" && (gate.status !== "PASS" || gate.validUntil <= ingestedAt)) {
         openPersistentHold(record, "LEGAL_UNRESOLVED_HOLD", "GATE_RESULT", gate.id, evidence, scope, "LEGAL", ingestedAt);
-        cancelActiveJobs(record, ingestedAt);
+        mustCancelActiveJobs = true;
       }
       if (conflicts.length) {
         const conflictItems = [...conflicts, gate]; const conflictSource = gateConflictSource(conflictItems, scope, ingestedAt);
         const type: ComplianceHoldType = gate.name === "LEGAL_REVIEW_PASSED" ? "LEGAL_UNRESOLVED_HOLD" : gate.name === "CUSTOMER_DATA_CLASSIFIED" ? "PROHIBITED_DATA_HOLD" : "SECURITY_ADVERSE_HOLD";
         openPersistentHold(record, type, "SYSTEM", conflictSource.sourceId, conflictSource.evidence, scope, type === "LEGAL_UNRESOLVED_HOLD" ? "LEGAL" : "SECURITY", ingestedAt);
-        cancelActiveJobs(record, ingestedAt);
+        if (type !== "LEGAL_UNRESOLVED_HOLD") complianceFailures.push(complianceFailureBinding(type, "SYSTEM", conflictSource.sourceId, conflictSource.evidence, "Gleichrangig konfliktbehaftete autoritative Evidence hat die laufende Autorisierung fail-closed invalidiert."));
+        mustCancelActiveJobs = true;
       }
+      if (mustCancelActiveJobs) cancelActiveJobs(record, ingestedAt, complianceFailures);
     });
   }
 
@@ -538,6 +551,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
         if (!verifiedActor.roles.some((role) => TRANSITION_ACTOR_ROLE_RULES[input.targetPhase].includes(role))) throw new WorkflowError("UNAUTHORIZED", `${input.actorId} ist fuer den Uebergang nach ${input.targetPhase} nicht autorisiert.`);
         if (!["BLOCKED", "FAILED", "CANCELLED"].includes(input.targetPhase)) {
           const replayNow = this.currentTime();
+          enforceRuntimeEvidenceForActiveJobInScope(record, prior.result.project.revisionDigest, operationScope, replayNow);
           assertNoOpenComplianceHolds(record, operationScope);
           assertOperationalEvidence(record, prior.result.project.revisionDigest, replayNow, [], operationScope, Boolean(prior.result.job) || isLegalRequiredPhase(input.targetPhase));
         }
@@ -566,6 +580,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
       const gates = resolveAndValidateGates(record, current, input, nextRevision, occurredAt);
       const holdClearances = resolveHoldClearances(record, current, input, nextRevision, occurredAt);
       if (!["BLOCKED", "FAILED", "CANCELLED"].includes(input.targetPhase)) {
+        enforceRuntimeEvidenceForActiveJobInScope(record, nextRevision, operationScope, occurredAt);
         assertNoOpenComplianceHolds(record, operationScope, holdClearances.map((item) => item.holdCode));
         assertNoAdverseSecurityOrLegal(record, nextRevision, occurredAt, operationScope);
         assertOperationalEvidence(record, nextRevision, occurredAt, holdClearances.map((item) => item.holdCode), operationScope, Boolean(input.startJob) || isLegalRequiredPhase(input.targetPhase));
@@ -627,7 +642,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     return this.withRecord(input.projectId, async (record) => {
       await this.assertTrustedWorker(input.workerId, input.projectId, "CLAIM");
       const replay = beginJobCommand(record, "claim", input.workerId, input.idempotencyKey, input);
-      if (replay) { const current = currentReplayState(record, replay); assertOperationalEvidence(record, current.revisionDigest, this.currentTime(), [], current.operationScope); return current; }
+      if (replay) { const current = currentReplayState(record, replay); const replayNow = this.currentTime(); if (current.status === "CLAIMED") enforceRuntimeEvidenceForClaimedJob(record, current, replayNow); assertOperationalEvidence(record, current.revisionDigest, replayNow, [], current.operationScope); return current; }
       if (record.jobs.some((candidate) => candidate.status === "CANCELLING")) throw new WorkflowError("JOB_NOT_ALLOWED", "Claims sind bis zur bestaetigten Job-Beendigung gesperrt.");
       const { index, job } = findJob(record, input.jobId);
       assertRunnableSnapshot(record, job, input);
@@ -651,6 +666,8 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
       await this.assertTrustedWorker(input.workerId, input.projectId, "AUTHORIZE");
       const { job } = findJob(record, input.jobId);
       const now = this.currentTime();
+      assertClaimedJobOwnership(record, job, input);
+      enforceRuntimeEvidenceForClaimedJob(record, job, now);
       assertActiveOwnedJob(record, job, input, now);
       assertOperationalEvidence(record, job.revisionDigest, now, [], job.operationScope);
       return cloneJob(job);
@@ -664,9 +681,11 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     return this.withRecord(input.projectId, async (record) => {
       await this.assertTrustedWorker(input.workerId, input.projectId, "HEARTBEAT");
       const replay = beginJobCommand(record, "heartbeat", input.workerId, input.idempotencyKey, input);
-      if (replay) { const current = currentReplayState(record, replay); assertOperationalEvidence(record, current.revisionDigest, this.currentTime(), [], current.operationScope); return current; }
+      if (replay) { const current = currentReplayState(record, replay); const replayNow = this.currentTime(); if (current.status === "CLAIMED") enforceRuntimeEvidenceForClaimedJob(record, current, replayNow); assertOperationalEvidence(record, current.revisionDigest, replayNow, [], current.operationScope); return current; }
       const { index, job } = findJob(record, input.jobId);
       const now = this.currentTime();
+      assertClaimedJobOwnership(record, job, input);
+      enforceRuntimeEvidenceForClaimedJob(record, job, now);
       assertActiveOwnedJob(record, job, input, now);
       assertOperationalEvidence(record, job.revisionDigest, now, [], job.operationScope);
       const updated: WorkflowJob = { ...job, leaseExpiresAt: new Date(now.getTime() + input.extendLeaseByMs) };
@@ -682,9 +701,11 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     return this.withRecord(input.projectId, async (record) => {
       await this.assertTrustedWorker(input.workerId, input.projectId, "COMPLETE");
       const replay = beginJobCommand(record, "complete", input.workerId, input.idempotencyKey, input);
-      if (replay) { const current = currentReplayState(record, replay); assertOperationalEvidence(record, current.revisionDigest, this.currentTime(), [], current.operationScope); return current; }
+      if (replay) { const current = currentReplayState(record, replay); const replayNow = this.currentTime(); if (current.status === "CLAIMED") enforceRuntimeEvidenceForClaimedJob(record, current, replayNow); assertOperationalEvidence(record, current.revisionDigest, replayNow, [], current.operationScope); return current; }
       const { index, job } = findJob(record, input.jobId);
       const now = this.currentTime();
+      assertClaimedJobOwnership(record, job, input);
+      enforceRuntimeEvidenceForClaimedJob(record, job, now);
       assertActiveOwnedJob(record, job, input, now);
       assertOperationalEvidence(record, job.revisionDigest, now, [], job.operationScope);
       const completed: WorkflowJob = { ...job, status: "COMPLETED", completedAt: now };
@@ -740,7 +761,8 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
       if (input.predecessorCounselCaseId) {
         const counselCase = record.counselCases.get(input.predecessorCounselCaseId);
         const decision = counselCase?.decisionId ? record.counselDecisions.get(counselCase.decisionId) : undefined;
-        if (!predecessor || !counselCase || counselCase.assessmentId !== predecessor.id || counselCase.state !== "CLOSED" || !decision || decision.predecessorAssessmentId !== predecessor.id || decision.qualifiedCounselIdentityRef !== counselCase.qualifiedCounselIdentityRef || decision.evidence.id !== counselCase.encryptedDecisionEvidenceId) throw new WorkflowError("GATE_INVALID", "Counsel-Successor-Kette ist unvollstaendig.");
+        if (!predecessor || !counselCase || !decision) throw new WorkflowError("GATE_INVALID", "Counsel-Successor-Kette ist unvollstaendig.");
+        assertCounselSuccessorChronology(input, predecessor, counselCase, decision, now);
       } else if (predecessor?.status === "COUNSEL_REQUIRED") throw new WorkflowError("GATE_INVALID", "Counsel-Successor benoetigt die geschlossene CounselCase-Referenz.");
       const requirements = input.requirements ?? [];
       if (input.status === "PASS_WITH_REQUIREMENTS" && requirements.length === 0) throw new WorkflowError("GATE_INVALID", "PASS_WITH_REQUIREMENTS benoetigt Anforderungen.");
@@ -818,7 +840,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
       if (!counselCase || counselCase.state !== "OPEN" || counselCase.assessmentId !== input.predecessorAssessmentId || !sameScope(counselCase, input)) throw new WorkflowError("GATE_INVALID", "Counsel Decision passt nicht zur offenen CounselCase.");
       const assessment = record.legalAssessments.get(counselCase.assessmentId);
       if (!assessment) throw new WorkflowError("GATE_INVALID", "Counsel Assessment fehlt.");
-      if (input.decidedAt <= counselCase.openedAt || input.decidedAt <= assessment.ingestedAt || input.decidedAt > now) throw new WorkflowError("GATE_INVALID", "Counsel Decision verletzt die strikte Case-/Assessment-Chronologie.");
+      if (input.decidedAt <= counselCase.openedAt || input.decidedAt <= assessment.ingestedAt || input.decidedAt >= now) throw new WorkflowError("GATE_INVALID", "Counsel Decision verletzt die strikte Case-/Assessment-Chronologie.");
       const counselNotBefore = new Date(Math.max(counselCase.openedAt.getTime(), assessment.ingestedAt.getTime()));
       validatePurposeEvidence(input.evidence, { projectId: input.projectId, scope: counselCase, revisionDigest: assessment.revisionDigest, evidenceType: "COUNSEL_DECISION", classification: "ENCRYPTED_COUNSEL_DECISION", trustedIdentity: input.qualifiedCounselIdentityRef, notBefore: counselNotBefore, eventAt: input.decidedAt, now });
       assertEvidenceUnused(record, input.evidence, "COUNSEL_DECISION");
@@ -1209,7 +1231,51 @@ function assertActiveOwnedJob(record: WorkflowRecord, job: WorkflowJob, request:
   assertRunnableSnapshot(record, job, request);
   if (job.status !== "CLAIMED" || job.leaseOwner !== request.workerId || job.claimIdempotencyKey !== request.claimIdempotencyKey || !job.leaseExpiresAt || job.leaseExpiresAt <= now) throw new WorkflowError("JOB_NOT_ALLOWED", "Job-Lease ist ungueltig, abgelaufen oder widerrufen.");
 }
-function cancelActiveJobs(record: WorkflowRecord, now: Date) {
+function assertClaimedJobOwnership(record: WorkflowRecord, job: WorkflowJob, request: OwnedJobRequest) {
+  assertRunnableSnapshot(record, job, request);
+  if (job.status !== "CLAIMED" || job.leaseOwner !== request.workerId || job.claimIdempotencyKey !== request.claimIdempotencyKey) throw new WorkflowError("JOB_NOT_ALLOWED", "Nur der aktuelle Lease-Inhaber darf den laufenden Job rechecken.");
+}
+interface ComplianceFailureBinding {
+  readonly holdId: string;
+  readonly reason: string;
+  readonly sourceRecordType: ProjectHold["sourceRecordType"];
+  readonly sourceRecordId: string;
+  readonly evidence: ImmutableEvidenceReference;
+}
+function complianceFailureBinding(holdType: ComplianceHoldType, sourceRecordType: ProjectHold["sourceRecordType"], sourceRecordId: string, evidence: ImmutableEvidenceReference, reason: string): ComplianceFailureBinding {
+  return { holdId: `${holdType}:${sourceRecordType}:${sourceRecordId}`, reason, sourceRecordType, sourceRecordId, evidence: cloneEvidenceReference(evidence) };
+}
+function runtimeEvidenceFailures(record: WorkflowRecord, revisionDigest: string, scope: ComplianceScope, now: Date): ComplianceFailureBinding[] {
+  const failures: ComplianceFailureBinding[] = [];
+  const checks = [
+    { gate: latestGate(record, "CUSTOMER_DATA_CLASSIFIED", revisionDigest, scope), holdType: "PROHIBITED_DATA_HOLD", reason: "Autoritative SYNTHETIC_ONLY-Evidence ist waehrend des laufenden Jobs abgelaufen oder zeitlich ungueltig." },
+    { gate: latestGate(record, "SECURITY_REVIEW_PASSED", revisionDigest, scope), holdType: "SECURITY_ADVERSE_HOLD", reason: "Positive Security-Evidence ist waehrend des laufenden Jobs abgelaufen oder zeitlich ungueltig." },
+  ] as const;
+  for (const check of checks) {
+    const gate = check.gate;
+    if (!gate || !isGateEffective(gate) || gate.evaluatedAt <= now && gate.ingestedAt <= now && gate.validUntil > now) continue;
+    const evidence = cloneEvidenceReference(gateEvidenceReference(gate, scope));
+    failures.push(complianceFailureBinding(check.holdType, "GATE_RESULT", gate.id, evidence, check.reason));
+  }
+  return failures;
+}
+function enforceRuntimeEvidenceForClaimedJob(record: WorkflowRecord, job: WorkflowJob, now: Date) {
+  const failures = runtimeEvidenceFailures(record, job.revisionDigest, job.operationScope, now);
+  if (!failures.length) return;
+  // All evidence bindings are cloned and validated before the first mutation.
+  const prepared = failures.map((failure) => ({ ...failure, evidence: cloneEvidenceReference(failure.evidence) }));
+  for (const failure of prepared) {
+    const holdType = failure.holdId.startsWith("PROHIBITED_DATA_HOLD:") ? "PROHIBITED_DATA_HOLD" : "SECURITY_ADVERSE_HOLD";
+    openPersistentHold(record, holdType, failure.sourceRecordType, failure.sourceRecordId, failure.evidence, job.operationScope, "SECURITY", now);
+  }
+  cancelActiveJobs(record, now, prepared);
+  throw new WorkflowError("JOB_NOT_ALLOWED", "Laufzeit-Evidence ist abgelaufen oder ungueltig; Hold und CANCELLING wurden atomar persistiert.");
+}
+function enforceRuntimeEvidenceForActiveJobInScope(record: WorkflowRecord, revisionDigest: string, scope: ComplianceScope, now: Date) {
+  const active = record.jobs.find((job) => job.status === "CLAIMED" && job.revisionDigest === revisionDigest && sameScope(job.operationScope, scope));
+  if (active) enforceRuntimeEvidenceForClaimedJob(record, active, now);
+}
+function cancelActiveJobs(record: WorkflowRecord, now: Date, complianceFailures: readonly ComplianceFailureBinding[] = []) {
   for (let index = 0; index < record.jobs.length; index++) {
     const job = record.jobs[index];
     if (!job) continue;
@@ -1220,14 +1286,14 @@ function cancelActiveJobs(record: WorkflowRecord, now: Date) {
     } else if (job.status === "CLAIMED") {
       const cancelling: WorkflowJob = { ...job, status: "CANCELLING" };
       record.jobs[index] = cancelling;
-      appendJobEvent(record, cancelling, "CANCELLING", now, job.leaseOwner);
+      appendJobEvent(record, cancelling, "CANCELLING", now, job.leaseOwner, undefined, undefined, complianceFailures);
     }
   }
 }
 function jobBinding(job: WorkflowJob) {
   return { id: job.id, type: job.type, status: job.status, revisionDigest: job.revisionDigest, aggregateVersion: job.aggregateVersion, operationScope: cloneScope(job.operationScope, "job.operationScope") };
 }
-function appendJobEvent(record: WorkflowRecord, job: WorkflowJob, type: JobEventType, occurredAt: Date, workerId?: string, idempotencyKey?: string, termination?: VerifiedTerminationEvidence) {
+function appendJobEvent(record: WorkflowRecord, job: WorkflowJob, type: JobEventType, occurredAt: Date, workerId?: string, idempotencyKey?: string, termination?: VerifiedTerminationEvidence, complianceFailures: readonly ComplianceFailureBinding[] = []) {
   const previousHash = record.jobEvents.at(-1)?.eventHash ?? null;
   const payload = {
     id: `${job.id}:event:${record.jobEvents.length + 1}`, projectId: job.projectId, jobId: job.id, type,
@@ -1235,8 +1301,11 @@ function appendJobEvent(record: WorkflowRecord, job: WorkflowJob, type: JobEvent
     jobType: job.type, revisionDigest: job.revisionDigest, aggregateVersion: job.aggregateVersion,
     ...(idempotencyKey ? { idempotencyKey } : {}),
     ...(termination ? { terminationEvidenceId: termination.id, terminationEvidenceDigest: termination.evidenceDigest } : {}), previousHash,
+    ...(complianceFailures.length ? { complianceFailureBindings: complianceFailures.map((failure) => ({ ...failure, evidence: evidenceReferencePayload(failure.evidence) })) } : {}),
   };
-  record.jobEvents.push({ ...payload, occurredAt, eventHash: hashCanonical(payload) });
+  const { complianceFailureBindings: serializedFailures, ...eventPayload } = payload;
+  void serializedFailures;
+  record.jobEvents.push({ ...eventPayload, occurredAt, ...(complianceFailures.length ? { complianceFailureBindings: complianceFailures.map((failure) => ({ ...failure, evidence: cloneEvidenceReference(failure.evidence) })) } : {}), eventHash: hashCanonical(payload) });
 }
 function jobCommandKey(operation: string, workerId: string, idempotencyKey: string) { return canonical([operation, workerId, idempotencyKey]); }
 function beginJobCommand(record: WorkflowRecord, operation: string, workerId: string, idempotencyKey: string, request: unknown): WorkflowJob | null {
@@ -1323,6 +1392,21 @@ function effectiveImmediateSuccessor(record: WorkflowRecord, predecessorId: stri
   const candidates = [...record.legalAssessments.values()].filter((item) => item.supersedesId === predecessorId && sameScope(item, scope) && item.ingestedAt > after && item.ingestedAt <= now && isLegalAssessmentEffective(record, item));
   return candidates.length === 1 ? candidates[0] : undefined;
 }
+function assertCounselSuccessorChronology(successor: LegalAssessmentInput | LegalAssessment, predecessor: LegalAssessment, counselCase: CounselCase, decision: CounselDecision, now: Date) {
+  const closedAt = counselCase.closedAt;
+  if (counselCase.assessmentId !== predecessor.id || counselCase.state !== "CLOSED" || !closedAt
+    || !sameScope(counselCase, predecessor) || !sameScope(decision, predecessor) || !sameScope(successor, predecessor)
+    || decision.counselCaseId !== counselCase.id || decision.predecessorAssessmentId !== predecessor.id
+    || decision.qualifiedCounselIdentityRef !== counselCase.qualifiedCounselIdentityRef || decision.evidence.id !== counselCase.encryptedDecisionEvidenceId
+    || decision.decidedAt <= counselCase.openedAt || decision.ingestedAt <= decision.decidedAt || closedAt.getTime() !== decision.ingestedAt.getTime()
+    || decision.evidence.verifiedAt <= counselCase.openedAt || decision.evidence.verifiedAt > decision.decidedAt
+    || successor.supersedesId !== predecessor.id || successor.predecessorCounselCaseId !== counselCase.id
+    || successor.finalizedAt <= closedAt || successor.evidence.finalizedAt <= closedAt || successor.evidence.verifiedAt <= closedAt
+    || successor.evidence.finalizedAt > successor.evidence.verifiedAt || successor.evidence.verifiedAt > successor.finalizedAt
+    || ("ingestedAt" in successor ? successor.ingestedAt <= successor.finalizedAt || successor.ingestedAt > now : successor.finalizedAt >= now)) {
+    throw new WorkflowError("GATE_INVALID", "Counsel-Successor verletzt Case -> Decision -> Close -> Finalization -> Ingest-Chronologie oder Scope-/Identitaetsbindung.");
+  }
+}
 function assertHoldClearable(record: WorkflowRecord, hold: ProjectHold, now: Date) {
   if (hold.holdType === "LEGAL_BLOCK_HOLD") {
     const successor = hold.sourceRecordType === "LEGAL_ASSESSMENT" ? effectiveImmediateSuccessor(record, hold.sourceRecordId, hold, hold.createdAt, now) : currentLegalAssessment(record, hold.sourceEvidence.revisionDigest, hold, now);
@@ -1344,7 +1428,8 @@ function assertHoldClearable(record: WorkflowRecord, hold: ProjectHold, now: Dat
     const counselCase = [...record.counselCases.values()].find((item) => item.assessmentId === assessment?.id);
     const decision = counselCase?.decisionId ? record.counselDecisions.get(counselCase.decisionId) : undefined;
     const successor = assessment && counselCase ? effectiveImmediateSuccessor(record, assessment.id, hold, hold.createdAt, now) : undefined;
-    if (!assessment || !counselCase || counselCase.state !== "CLOSED" || !decision || decision.qualifiedCounselIdentityRef !== counselCase.qualifiedCounselIdentityRef || decision.evidence.id !== counselCase.encryptedDecisionEvidenceId || successor?.predecessorCounselCaseId !== counselCase.id) throw new WorkflowError("GATE_INVALID", "Counsel-Hold benoetigt Case -> qualified Decision -> wirksamen Successor.");
+    if (!assessment || !counselCase || !decision || !successor) throw new WorkflowError("GATE_INVALID", "Counsel-Hold benoetigt Case -> qualified Decision -> wirksamen Successor.");
+    assertCounselSuccessorChronology(successor, assessment, counselCase, decision, now);
   }
 }
 function gateEvidenceReference(gate: GateResult, scope: ComplianceScope): ImmutableEvidenceReference { return { id: `${gate.id}:evidence`, projectId: gate.projectId, ...scope, revisionDigest: gate.subjectRevisionDigest, contentDigest: gate.evidenceDigest, evidenceType: gate.name, classification: "GATE_ATTESTATION", finalizedAt: new Date(gate.evaluatedAt), verifiedAt: new Date(gate.ingestedAt), trustedIdentity: gate.trustedAttester }; }
@@ -1401,7 +1486,11 @@ const cloneHoldClearanceEvidence = (value: HoldClearanceEvidence): HoldClearance
 const cloneVerifiedHoldClearance = (value: VerifiedHoldClearance): VerifiedHoldClearance => ({ ...cloneUnsignedHoldClearanceEvidence(value), ingestedAt: strictDate(value.ingestedAt, "holdClearance.ingestedAt") });
 const cloneJob = (job: WorkflowJob): WorkflowJob => ({ ...job, operationScope: cloneScope(job.operationScope, "job.operationScope"), createdAt: strictDate(job.createdAt, "createdAt"), ...(job.claimedAt ? { claimedAt: strictDate(job.claimedAt, "claimedAt") } : {}), ...(job.leaseExpiresAt ? { leaseExpiresAt: strictDate(job.leaseExpiresAt, "leaseExpiresAt") } : {}), ...(job.completedAt ? { completedAt: strictDate(job.completedAt, "completedAt") } : {}), ...(job.cancelledAt ? { cancelledAt: strictDate(job.cancelledAt, "cancelledAt") } : {}) });
 const cloneAudit = (event: AuditEvent): AuditEvent => ({ ...event, operationScope: cloneScope(event.operationScope, "audit.operationScope"), occurredAt: strictDate(event.occurredAt, "occurredAt"), gateBindings: event.gateBindings.map((gate) => ({ ...gate })), blockReasons: cloneReasons(event.blockReasons), ...(event.holdClearanceBindings ? { holdClearanceBindings: event.holdClearanceBindings.map(cloneVerifiedHoldClearance) } : {}), ...(event.jobBinding ? { jobBinding: { ...event.jobBinding, operationScope: cloneScope(event.jobBinding.operationScope, "audit.jobBinding.operationScope") } } : {}) });
-const cloneJobEvent = (event: JobAuditEvent): JobAuditEvent => ({ ...event, occurredAt: strictDate(event.occurredAt, "occurredAt") });
+const cloneJobEvent = (event: JobAuditEvent): JobAuditEvent => ({
+  ...event,
+  occurredAt: strictDate(event.occurredAt, "occurredAt"),
+  ...(event.complianceFailureBindings ? { complianceFailureBindings: event.complianceFailureBindings.map((binding) => ({ ...binding, evidence: cloneEvidenceReference(binding.evidence) })) } : {}),
+});
 function cloneResult(result: Omit<TransitionResult, "duplicate">, duplicate: boolean): TransitionResult { return { project: cloneProject(result.project), auditEvent: cloneAudit(result.auditEvent), ...(result.job ? { job: cloneJob(result.job) } : {}), duplicate }; }
 function strictString(value: unknown, field: string): string { if (typeof value !== "string") throw new WorkflowError("INVALID_REQUEST", `${field} muss ein String sein.`); return value; }
 function strictDate(value: unknown, field: string): Date { if (!(value instanceof Date) || !Number.isFinite(value.getTime())) throw new WorkflowError("INVALID_REQUEST", `${field} muss ein gueltiges Date sein.`); return new Date(value.getTime()); }

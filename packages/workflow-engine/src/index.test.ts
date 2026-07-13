@@ -549,6 +549,18 @@ function scopedAssessment(id: string, scopeType: string, scopeId: string, revisi
   return assessment(id, "PASS", { scopeType, scopeId, revisionDigest, evidence: evidence(`${id}-scoped-evidence`, { scopeType, scopeId, revisionDigest, evidenceType: "LEGAL_ASSESSMENT", classification: "VERIFIED_LEGAL_ASSESSMENT" }) });
 }
 
+async function claimedJobWithExpiringEvidence(kind: "SECURITY" | "SYNTHETIC_ONLY", clock: { value: Date }) {
+  const fixture = make(() => new Date(clock.value));
+  await fixture.engine.createProject("project-1", POLICY, REVISION);
+  await fixture.trustedGateIngestor.ingest(gate("CUSTOMER_DATA_CLASSIFIED", `runtime-${kind}`, { validUntil: new Date(START.getTime() + (kind === "SYNTHETIC_ONLY" ? 1 : 60_000)) }), "security");
+  if (kind === "SECURITY") await fixture.trustedGateIngestor.ingest(gate("SECURITY_REVIEW_PASSED", "runtime-expiry", { validUntil: new Date(START.getTime() + 1) }), "security");
+  await fixture.trustedLegalAssessmentIngestor.ingest(assessment(`runtime-legal-${kind}`, "PASS"));
+  const started = await fixture.engine.transition(command("DISCOVERY", 0, { idempotencyKey: `runtime-start-${kind}`, startJob: { type: "DISCOVERY_CONTROL" } }));
+  const claim = { jobId: started.job!.id, projectId: "project-1", expectedAggregateVersion: 1, expectedRevisionDigest: REVISION, workerId: "worker-1", idempotencyKey: `runtime-claim-${kind}`, leaseDurationMs: 60_000 };
+  await fixture.engine.claimJob(claim);
+  return { ...fixture, owned: { jobId: started.job!.id, projectId: "project-1", expectedAggregateVersion: 1, expectedRevisionDigest: REVISION, workerId: "worker-1", claimIdempotencyKey: claim.idempotencyKey, idempotencyKey: `runtime-recheck-${kind}` } };
+}
+
 describe("compliance state hardening domain", () => {
   it("fails closed and atomically creates no job without current SYNTHETIC_ONLY evidence", async () => {
     const { engine } = make();
@@ -592,15 +604,16 @@ describe("compliance state hardening domain", () => {
     let now = new Date(START); const fixture = make(() => new Date(now)); await create(fixture.engine);
     await fixture.trustedLegalAssessmentIngestor.ingest(assessment("needs-counsel", "COUNSEL_REQUIRED"));
     const counselCase = (await fixture.engine.getCounselCases("project-1"))[0]!;
-    now = new Date(START.getTime() + 1); const decision = {
+    now = new Date(START.getTime() + 2); const decisionAt = new Date(START.getTime() + 1); const decision = {
       id: "decision-1", projectId: "project-1", counselCaseId: counselCase.id, predecessorAssessmentId: "needs-counsel",
-      qualifiedCounselIdentityRef: "qualified-counsel", scopeType: "PROJECT", scopeId: "project-1", decidedAt: now,
-      evidence: evidence("encrypted-decision", { evidenceType: "COUNSEL_DECISION", classification: "ENCRYPTED_COUNSEL_DECISION", trustedIdentity: "qualified-counsel", finalizedAt: now, verifiedAt: now }),
+      qualifiedCounselIdentityRef: "qualified-counsel", scopeType: "PROJECT", scopeId: "project-1", decidedAt: decisionAt,
+      evidence: evidence("encrypted-decision", { evidenceType: "COUNSEL_DECISION", classification: "ENCRYPTED_COUNSEL_DECISION", trustedIdentity: "qualified-counsel", finalizedAt: decisionAt, verifiedAt: decisionAt }),
     };
     await fixture.trustedCounselDecisionIngestor.ingest(decision);
     expect((await fixture.engine.getCounselCases("project-1"))[0]).toMatchObject({ state: "CLOSED", decisionId: "decision-1", encryptedDecisionEvidenceId: "encrypted-decision" });
     await expect(fixture.trustedLegalAssessmentIngestor.ingest(assessment("bad-successor", "PASS", { supersedesId: "needs-counsel" }))).rejects.toMatchObject({ code: "GATE_INVALID" });
-    await fixture.trustedLegalAssessmentIngestor.ingest(assessment("counsel-successor", "PASS", { supersedesId: "needs-counsel", predecessorCounselCaseId: counselCase.id }));
+    now = new Date(START.getTime() + 4); const successorAt = new Date(START.getTime() + 3);
+    await fixture.trustedLegalAssessmentIngestor.ingest(assessment("counsel-successor", "PASS", { supersedesId: "needs-counsel", predecessorCounselCaseId: counselCase.id, finalizedAt: successorAt, evidence: evidence("counsel-successor-evidence", { evidenceType: "LEGAL_ASSESSMENT", classification: "VERIFIED_LEGAL_ASSESSMENT", finalizedAt: successorAt, verifiedAt: successorAt }) }));
     expect((await fixture.engine.getLegalAssessments("project-1")).find((item) => item.id === "counsel-successor")).toMatchObject({ supersedesId: "needs-counsel", predecessorCounselCaseId: counselCase.id });
   });
 
@@ -830,10 +843,10 @@ describe("compliance state hardening domain", () => {
     await fixture.trustedLegalAssessmentIngestor.ingest(assessment("flow-counsel", "COUNSEL_REQUIRED")); const counselCase = (await engine.getCounselCases("project-1"))[0]!; const hold = (await engine.getProjectHolds("project-1"))[0]!;
     now = new Date(START.getTime() + 2);
     await fixture.trustedCounselDecisionIngestor.ingest({ id: "flow-decision", projectId: "project-1", counselCaseId: counselCase.id, predecessorAssessmentId: "flow-counsel", qualifiedCounselIdentityRef: "qualified-counsel", scopeType: "PROJECT", scopeId: "project-1", decidedAt: new Date(START.getTime() + 1), evidence: evidence("flow-decision-evidence", { evidenceType: "COUNSEL_DECISION", classification: "ENCRYPTED_COUNSEL_DECISION", trustedIdentity: "qualified-counsel", finalizedAt: new Date(START.getTime() + 1), verifiedAt: new Date(START.getTime() + 1) }) });
-    now = new Date(START.getTime() + 3);
-    await fixture.trustedLegalAssessmentIngestor.ingest(assessment("flow-successor", "PASS", { supersedesId: "flow-counsel", predecessorCounselCaseId: counselCase.id, finalizedAt: new Date(START.getTime() + 2), evidence: evidence("flow-successor-evidence", { evidenceType: "LEGAL_ASSESSMENT", classification: "VERIFIED_LEGAL_ASSESSMENT", finalizedAt: new Date(START.getTime() + 2), verifiedAt: new Date(START.getTime() + 2) }) }));
-    now = new Date(START.getTime() + 5); const clearanceRef = evidence("flow-clearance", { evidenceType: "HOLD_CLEARANCE", classification: "VERIFIED_CLEARANCE", trustedIdentity: "legal", finalizedAt: new Date(START.getTime() + 4), verifiedAt: new Date(START.getTime() + 4) });
-    await fixture.trustedHoldClearanceIngestor.ingest({ id: "flow-clear", projectId: "project-1", holdCode: hold.id, clearingAuthority: "LEGAL", authorityId: "legal", subjectRevisionDigest: REVISION, scopeType: hold.scopeType, scopeId: hold.scopeId, sourceRecordType: hold.sourceRecordType, sourceRecordId: hold.sourceRecordId, evidenceDigest: clearanceRef.contentDigest, evidenceRef: clearanceRef, verifiedAt: new Date(START.getTime() + 4) });
+    now = new Date(START.getTime() + 4);
+    await fixture.trustedLegalAssessmentIngestor.ingest(assessment("flow-successor", "PASS", { supersedesId: "flow-counsel", predecessorCounselCaseId: counselCase.id, finalizedAt: new Date(START.getTime() + 3), evidence: evidence("flow-successor-evidence", { evidenceType: "LEGAL_ASSESSMENT", classification: "VERIFIED_LEGAL_ASSESSMENT", finalizedAt: new Date(START.getTime() + 3), verifiedAt: new Date(START.getTime() + 3) }) }));
+    now = new Date(START.getTime() + 6); const clearanceRef = evidence("flow-clearance", { evidenceType: "HOLD_CLEARANCE", classification: "VERIFIED_CLEARANCE", trustedIdentity: "legal", finalizedAt: new Date(START.getTime() + 5), verifiedAt: new Date(START.getTime() + 5) });
+    await fixture.trustedHoldClearanceIngestor.ingest({ id: "flow-clear", projectId: "project-1", holdCode: hold.id, clearingAuthority: "LEGAL", authorityId: "legal", subjectRevisionDigest: REVISION, scopeType: hold.scopeType, scopeId: hold.scopeId, sourceRecordType: hold.sourceRecordType, sourceRecordId: hold.sourceRecordId, evidenceDigest: clearanceRef.contentDigest, evidenceRef: clearanceRef, verifiedAt: new Date(START.getTime() + 5) });
     await expect(engine.transition(command("DISCOVERY", 0, { holdClearanceIds: ["flow-clear"] }))).resolves.toMatchObject({ project: { phase: "DISCOVERY" } });
     expect((await engine.getProjectHolds("project-1"))[0]).toMatchObject({ holdType: "COUNSEL_REQUIRED_HOLD", state: "CLEARED", clearingEvidence: { id: "flow-clear" } });
   });
@@ -853,6 +866,101 @@ describe("compliance state hardening domain", () => {
       expect((await engine.getProjectHolds("project-1")).some((hold) => hold.holdType === "LEGAL_UNRESOLVED_HOLD" && hold.state === "OPEN")).toBe(true);
       expect((await engine.getJobs("project-1"))[0]?.status).toBe(claimed ? "CANCELLING" : "CANCELLED");
     }
+  });
+
+  it("rejects backdated Counsel successors for every canonical boundary and accepts only the valid sequence", async () => {
+    let now = new Date(START); const fixture = make(() => new Date(now)); await create(fixture.engine);
+    await fixture.trustedLegalAssessmentIngestor.ingest(assessment("temporal-counsel", "COUNSEL_REQUIRED"));
+    const counselCase = (await fixture.engine.getCounselCases("project-1")).find((item) => item.assessmentId === "temporal-counsel")!;
+    const hold = (await fixture.engine.getProjectHolds("project-1")).find((item) => item.sourceRecordId === "temporal-counsel")!;
+    now = new Date(START.getTime() + 2); const decisionAt = new Date(START.getTime() + 1);
+    await fixture.trustedCounselDecisionIngestor.ingest({ id: "temporal-decision", projectId: "project-1", counselCaseId: counselCase.id, predecessorAssessmentId: "temporal-counsel", qualifiedCounselIdentityRef: "qualified-counsel", scopeType: "PROJECT", scopeId: "project-1", decidedAt: decisionAt, evidence: evidence("temporal-decision-evidence", { evidenceType: "COUNSEL_DECISION", classification: "ENCRYPTED_COUNSEL_DECISION", trustedIdentity: "qualified-counsel", finalizedAt: decisionAt, verifiedAt: decisionAt }) });
+    const successor = (id: string, finalizedAt: Date, overrides: Partial<LegalAssessmentInput> = {}) => assessment(id, "PASS", { supersedesId: "temporal-counsel", predecessorCounselCaseId: counselCase.id, finalizedAt, evidence: evidence(`${id}-evidence`, { evidenceType: "LEGAL_ASSESSMENT", classification: "VERIFIED_LEGAL_ASSESSMENT", finalizedAt, verifiedAt: finalizedAt }), ...overrides });
+    now = new Date(START.getTime() + 20);
+    await expect(fixture.trustedLegalAssessmentIngestor.ingest(successor("before-case-open", new Date(START.getTime() - 1)))).rejects.toMatchObject({ code: "GATE_INVALID" });
+    await expect(fixture.trustedLegalAssessmentIngestor.ingest(successor("before-decision", new Date(START.getTime() + 0.5)))).rejects.toMatchObject({ code: "GATE_INVALID" });
+    await expect(fixture.trustedLegalAssessmentIngestor.ingest(successor("before-case-close", new Date(START.getTime() + 1.5)))).rejects.toMatchObject({ code: "GATE_INVALID" });
+    now = new Date(START.getTime() + 10_000);
+    await expect(fixture.trustedLegalAssessmentIngestor.ingest(successor("late-ingested-backdated", new Date(START.getTime() + 1.5)))).rejects.toMatchObject({ code: "GATE_INVALID" });
+    await expect(fixture.trustedLegalAssessmentIngestor.ingest(successor("wrong-case", new Date(START.getTime() + 3), { predecessorCounselCaseId: "different-case" }))).rejects.toMatchObject({ code: "GATE_INVALID" });
+    await expect(fixture.trustedLegalAssessmentIngestor.ingest(successor("wrong-scope", new Date(START.getTime() + 3), { scopeType: "TASK", scopeId: "task-1", evidence: evidence("wrong-scope-evidence", { scopeType: "TASK", scopeId: "task-1", evidenceType: "LEGAL_ASSESSMENT", classification: "VERIFIED_LEGAL_ASSESSMENT", finalizedAt: new Date(START.getTime() + 3), verifiedAt: new Date(START.getTime() + 3) }) }))).rejects.toMatchObject({ code: "GATE_INVALID" });
+    const validAt = new Date(START.getTime() + 3);
+    await fixture.trustedLegalAssessmentIngestor.ingest(successor("valid-temporal-successor", validAt));
+    now = new Date(START.getTime() + 10_002); const clearanceAt = new Date(START.getTime() + 10_001);
+    const clearanceRef = evidence("temporal-clearance", { evidenceType: "HOLD_CLEARANCE", classification: "VERIFIED_CLEARANCE", trustedIdentity: "legal", finalizedAt: clearanceAt, verifiedAt: clearanceAt });
+    await fixture.trustedHoldClearanceIngestor.ingest({ id: "temporal-clear", projectId: "project-1", holdCode: hold.id, clearingAuthority: "LEGAL", authorityId: "legal", subjectRevisionDigest: REVISION, scopeType: hold.scopeType, scopeId: hold.scopeId, sourceRecordType: hold.sourceRecordType, sourceRecordId: hold.sourceRecordId, evidenceDigest: clearanceRef.contentDigest, evidenceRef: clearanceRef, verifiedAt: clearanceAt });
+    await expect(fixture.engine.transition(command("DISCOVERY", 0, { idempotencyKey: "temporal-cleared", holdClearanceIds: ["temporal-clear"] }))).resolves.toMatchObject({ project: { phase: "DISCOVERY" } });
+  });
+
+  it.each(["SECURITY", "SYNTHETIC_ONLY"] as const)("atomically stops CLAIMED work when %s evidence expires and audits the reason/evidence", async (kind) => {
+    const clock = { value: new Date(START) }; const fixture = await claimedJobWithExpiringEvidence(kind, clock); clock.value = new Date(START.getTime() + 2);
+    await expect(fixture.engine.authorizeJobWork(fixture.owned)).rejects.toMatchObject({ code: "JOB_NOT_ALLOWED" });
+    const expectedHold = kind === "SECURITY" ? "SECURITY_ADVERSE_HOLD" : "PROHIBITED_DATA_HOLD";
+    const holds = (await fixture.engine.getProjectHolds("project-1")).filter((item) => item.holdType === expectedHold);
+    expect(holds).toHaveLength(1); expect((await fixture.engine.getJobs("project-1"))[0]).toMatchObject({ status: "CANCELLING" });
+    const event = (await fixture.engine.getJobEvents("project-1")).filter((item) => item.type === "CANCELLING")[0]!;
+    expect(event.complianceFailureBindings).toEqual([expect.objectContaining({ holdId: holds[0]!.id, reason: expect.stringContaining("abgelaufen"), sourceRecordId: holds[0]!.sourceRecordId, evidence: expect.objectContaining({ id: holds[0]!.sourceEvidence.id, contentDigest: holds[0]!.sourceEvidence.contentDigest }) })]);
+    event.complianceFailureBindings![0]!.evidence.verifiedAt.setTime(0);
+    expect((await fixture.engine.getJobEvents("project-1")).find((item) => item.id === event.id)?.complianceFailureBindings?.[0]?.evidence.verifiedAt).toEqual(holds[0]!.sourceEvidence.verifiedAt);
+  });
+
+  it("safe-stops an already running heartbeat and makes repeated/concurrent rechecks idempotent with an existing hold", async () => {
+    const clock = { value: new Date(START) }; const fixture = await claimedJobWithExpiringEvidence("SYNTHETIC_ONLY", clock); clock.value = new Date(START.getTime() + 2);
+    const heartbeat = { ...fixture.owned, idempotencyKey: "running-heartbeat", extendLeaseByMs: 1_000 };
+    const concurrent = await Promise.allSettled([fixture.engine.heartbeatJob(heartbeat), fixture.engine.heartbeatJob(heartbeat)]);
+    expect(concurrent.every((result) => result.status === "rejected" && (result.reason as { code?: string }).code === "JOB_NOT_ALLOWED")).toBe(true);
+    const beforeHolds = await fixture.engine.getProjectHolds("project-1"); const beforeEvents = await fixture.engine.getJobEvents("project-1");
+    await expect(fixture.engine.heartbeatJob(heartbeat)).rejects.toMatchObject({ code: "JOB_NOT_ALLOWED" });
+    expect(await fixture.engine.getProjectHolds("project-1")).toEqual(beforeHolds);
+    expect(await fixture.engine.getJobEvents("project-1")).toEqual(beforeEvents);
+    expect(beforeHolds.filter((item) => item.holdType === "PROHIBITED_DATA_HOLD")).toHaveLength(1);
+    expect(beforeEvents.filter((item) => item.type === "CANCELLING")).toHaveLength(1);
+  });
+
+  it("rolls back an invalid runtime recheck before any hold or CANCELLING mutation", async () => {
+    const clock = { value: new Date(START) }; const fixture = await claimedJobWithExpiringEvidence("SECURITY", clock);
+    const jobsBefore = await fixture.engine.getJobs("project-1"); const holdsBefore = await fixture.engine.getProjectHolds("project-1"); const eventsBefore = await fixture.engine.getJobEvents("project-1");
+    clock.value = new Date(Number.NaN);
+    await expect(fixture.engine.authorizeJobWork(fixture.owned)).rejects.toMatchObject({ code: "INVALID_REQUEST" });
+    expect(await fixture.engine.getJobs("project-1")).toEqual(jobsBefore);
+    expect(await fixture.engine.getProjectHolds("project-1")).toEqual(holdsBefore);
+    expect(await fixture.engine.getJobEvents("project-1")).toEqual(eventsBefore);
+  });
+
+  it("atomically audits newly ingested adverse Security evidence while CLAIMED and remains idempotent under concurrent ingest", async () => {
+    const clock = { value: new Date(START) }; const fixture = await claimedJobWithExpiringEvidence("SYNTHETIC_ONLY", clock);
+    const adverse = gate("SECURITY_REVIEW_PASSED", "claimed-adverse", { status: "BLOCK" });
+    const concurrent = await Promise.allSettled([
+      fixture.trustedGateIngestor.ingest(adverse, "security"),
+      fixture.trustedGateIngestor.ingest(adverse, "security"),
+    ]);
+    expect(concurrent.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(concurrent.filter((result) => result.status === "rejected" && (result.reason as { code?: string }).code === "GATE_ALREADY_EXISTS")).toHaveLength(1);
+    const holds = (await fixture.engine.getProjectHolds("project-1")).filter((item) => item.holdType === "SECURITY_ADVERSE_HOLD");
+    const cancelling = (await fixture.engine.getJobEvents("project-1")).filter((item) => item.type === "CANCELLING");
+    expect(holds).toHaveLength(1); expect(cancelling).toHaveLength(1); expect((await fixture.engine.getJobs("project-1"))[0]?.status).toBe("CANCELLING");
+    expect(cancelling[0]!.complianceFailureBindings).toEqual([expect.objectContaining({ holdId: holds[0]!.id, sourceRecordType: "GATE_RESULT", sourceRecordId: adverse.id, reason: expect.stringContaining("advers invalidiert"), evidence: expect.objectContaining({ id: `${adverse.id}:evidence`, contentDigest: adverse.evidenceDigest }) })]);
+    const snapshot = { holds: await fixture.engine.getProjectHolds("project-1"), events: await fixture.engine.getJobEvents("project-1") };
+    await expect(fixture.trustedGateIngestor.ingest(adverse, "security")).rejects.toMatchObject({ code: "GATE_ALREADY_EXISTS" });
+    expect(await fixture.engine.getProjectHolds("project-1")).toEqual(snapshot.holds); expect(await fixture.engine.getJobEvents("project-1")).toEqual(snapshot.events);
+  });
+
+  it("atomically audits both the adverse source and authoritative conflict source in one CANCELLING event", async () => {
+    const clock = { value: new Date(START) }; const fixture = await claimedJobWithExpiringEvidence("SYNTHETIC_ONLY", clock);
+    const pass = gate("SECURITY_REVIEW_PASSED", "claimed-conflict-pass"); const block = gate("SECURITY_REVIEW_PASSED", "claimed-conflict-block", { status: "BLOCK" });
+    await fixture.trustedGateIngestor.ingest(pass, "security");
+    await fixture.trustedGateIngestor.ingest(block, "security");
+    const holds = (await fixture.engine.getProjectHolds("project-1")).filter((item) => item.holdType === "SECURITY_ADVERSE_HOLD").sort((a, b) => a.id.localeCompare(b.id));
+    const cancelling = (await fixture.engine.getJobEvents("project-1")).filter((item) => item.type === "CANCELLING");
+    expect(holds).toHaveLength(2); expect(cancelling).toHaveLength(1); expect((await fixture.engine.getJobs("project-1"))[0]?.status).toBe("CANCELLING");
+    expect(cancelling[0]!.complianceFailureBindings?.map((item) => item.holdId).sort()).toEqual(holds.map((item) => item.id));
+    expect(cancelling[0]!.complianceFailureBindings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceRecordType: "GATE_RESULT", sourceRecordId: block.id, evidence: expect.objectContaining({ id: `${block.id}:evidence`, contentDigest: block.evidenceDigest }) }),
+      expect.objectContaining({ sourceRecordType: "SYSTEM", sourceRecordId: expect.stringContaining("gate-conflict:"), reason: expect.stringContaining("konfliktbehaftete"), evidence: expect.objectContaining({ evidenceType: "GATE_CONFLICT", classification: "SYSTEM_FAIL_CLOSED" }) }),
+    ]));
+    const before = { holds: await fixture.engine.getProjectHolds("project-1"), events: await fixture.engine.getJobEvents("project-1") };
+    await expect(fixture.trustedGateIngestor.ingest(block, "security")).rejects.toMatchObject({ code: "GATE_ALREADY_EXISTS" });
+    expect(await fixture.engine.getProjectHolds("project-1")).toEqual(before.holds); expect(await fixture.engine.getJobEvents("project-1")).toEqual(before.events);
   });
 
   it("enforces and immutably persists Requirement submission and decision chronology", async () => {
