@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync,readdirSync } from "node:fs";
 import { dirname,join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe,expect,it } from "vitest";
@@ -6,7 +6,8 @@ import type { ProjectId } from "@software-builder/core";
 import { HmacCapabilityAuthority } from "./capabilities.js";
 import { validatePersistenceInput } from "./index.js";
 import { projectStatuses,taskStatuses } from "./types.js";
-const sql=readFileSync(join(dirname(fileURLToPath(import.meta.url)),"..","migrations","001_persistence_foundation.sql"),"utf8");
+const migrationDirectory=join(dirname(fileURLToPath(import.meta.url)),"..","migrations");
+const sql=readdirSync(migrationDirectory).filter(file=>file.endsWith(".sql")).sort().map(file=>readFileSync(join(migrationDirectory,file),"utf8")).join("\n");
 
 describe("Persistence-Schema",()=>{
   it("bildet alle Datenbereiche sowie Milestone und Attempt ab",()=>{
@@ -31,6 +32,15 @@ describe("Persistence-Schema",()=>{
     expect(sql).toContain("base_revision_digest"); expect(sql).toContain("output_revision_digest");
     for(const field of ["provider_profile_id","adapter_version","sdk_runtime_version","model_policy_id","provider_thread_ref"]) expect(sql).toContain(field);
     expect(sql).toMatch(/workflow_runs[\s\S]*task_id uuid NOT NULL/);
+  });
+  it("persistiert Workflow-Aggregat, Compliance, Leases und Fencing additiv",()=>{
+    for(const table of ["workflow_aggregates","workflow_revisions","workflow_evidence","legal_assessments","legal_requirements","counsel_cases","counsel_decisions","project_holds","hold_clearances","termination_evidence","job_audit_events","workflow_transition_details","workflow_fence_counters"]) expect(sql).toContain(`CREATE TABLE builder.${table}`);
+    expect(sql).toContain("storage_version bigint");
+    expect(sql).toContain("fencing_token bigint");
+    expect(sql).toContain("background_jobs_project_fence_unique");
+    expect(sql).toContain("'AUTHORIZED'");
+    expect(sql).toContain("termination_evidence_project_job_fk");
+    expect(sql).toContain("job_audit_events_project_job_fk");
   });
   it("validiert opaque Capabilities, Ablauf und Signatur",async()=>{
     let now=new Date("2026-01-01T00:00:00Z"); const authority=new HmacCapabilityAuthority(new Uint8Array(32).fill(7),()=>now); const id="00000000-0000-4000-8000-000000000001" as ProjectId;

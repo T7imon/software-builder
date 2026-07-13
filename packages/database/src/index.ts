@@ -1,10 +1,21 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import type { ProjectId } from "@software-builder/core";
+import type { ProjectWorkflow, WorkflowPersistenceProjection } from "@software-builder/workflow-engine";
 import type { BootstrapCapability, BootstrapCapabilityVerifier, BuilderProject, CommandEnvelope, CommandResult, CreateProjectInput, EntityMutation, ProjectCapability, ProjectCapabilityVerifier, ProjectContextIssuer, TaskRecord, VerifiedProjectCapability } from "./types.js";
+
+export interface WorkflowLeaseGuard {
+  readonly jobId: string;
+  readonly workerId: string;
+  readonly claimIdempotencyKey: string;
+  readonly fencingToken: number;
+  readonly allowedStatuses: readonly string[];
+}
+export type WorkflowLeaseGuardResult = "VALID" | "VERSION_CONFLICT" | "LEASE_INVALID";
 
 export * from "./capabilities.js";
 export * from "./types.js";
+export * from "./workflow-repository.js";
 
 interface ProjectRow { id: string; project_type: "FULL_STACK_WEB"; status: BuilderProject["status"]; version: number; created_at: Date; updated_at: Date; }
 interface TaskRow { id: string; project_id: string; milestone_id: string; task_type: string; statement_ref: string; acceptance_criteria_ref: string; status: TaskRecord["status"]; repair_count: number; version: number; created_at: Date; updated_at: Date; }
@@ -188,6 +199,52 @@ export class PostgresDatabase {
     });
   }
 
+  async createWorkflowState(capability: BootstrapCapability, subject: string, actorScope: string, project: ProjectWorkflow, snapshot: string, projection: WorkflowPersistenceProjection): Promise<void> {
+    await this.verifyBootstrap(capability,subject,actorScope);
+    validatePersistenceInput(project);
+    if(snapshot.length<2||snapshot.length>10_000_000)throw new Error("Workflow-Snapshot ist ungueltig oder zu gross.");
+    await this[bootstrapSession](project.projectId as ProjectId,{ actorIdentityId:subject,actorScope } as CommandEnvelope,async(session)=>{
+      await session.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`workflow:${project.projectId}`]);
+      if((await session.query("SELECT 1 FROM builder.workflow_aggregates WHERE project_id=$1",[project.projectId])).rowCount) throw new Error("WORKFLOW_PROJECT_ALREADY_EXISTS");
+      await session.query("INSERT INTO builder.projects(id,status) VALUES($1,'PLANNING') ON CONFLICT(id) DO NOTHING",[project.projectId]);
+      await session.query(`INSERT INTO builder.workflow_aggregates(project_id,phase,aggregate_version,storage_version,policy_version,revision_digest,state_snapshot) VALUES($1,$2,$3,0,$4,$5,$6::jsonb)`,[project.projectId,project.phase,project.version,project.policyVersion,project.revisionDigest,snapshot]);
+      const emitted=await persistWorkflowProjection(session,projection);
+      if(emitted===0)await appendWorkflowStateMutation(session,subject,snapshot,projection);
+    });
+  }
+
+  async readWorkflowState(capability: ProjectCapability): Promise<{ readonly snapshot:string; readonly storageVersion:number; readonly databaseNow:Date }|null> {
+    return this[readSession](capability,"workflow_state:read",async(session)=>{
+      const row=(await session.query<{state_snapshot:unknown;storage_version:string;database_now:Date}>("SELECT state_snapshot,storage_version,clock_timestamp() database_now FROM builder.workflow_aggregates WHERE project_id=$1",[session.projectId])).rows[0];
+      return row?{snapshot:JSON.stringify(row.state_snapshot),storageVersion:Number(row.storage_version),databaseNow:row.database_now}:null;
+    });
+  }
+
+  async validateWorkflowLease(capability:ProjectCapability,expectedStorageVersion:number,guard:WorkflowLeaseGuard):Promise<WorkflowLeaseGuardResult>{
+    const verified=await this.claim(capability,"workflow_state:append");
+    return this.transaction(verified,async(session)=>{
+      const aggregate=await session.query<{storage_version:string}>("SELECT storage_version FROM builder.workflow_aggregates WHERE project_id=$1 FOR UPDATE",[session.projectId]);
+      if(Number(aggregate.rows[0]?.storage_version)!==expectedStorageVersion)return "VERSION_CONFLICT";
+      return await workflowLeaseIsValid(session,guard)?"VALID":"LEASE_INVALID";
+    });
+  }
+
+  async compareAndSwapWorkflowState(capability: ProjectCapability, expectedStorageVersion:number, snapshot:string, projection:WorkflowPersistenceProjection, leaseGuard?:WorkflowLeaseGuard):Promise<WorkflowLeaseGuardResult>{
+    validatePersistenceInput(projection.project);
+    if(snapshot.length<2||snapshot.length>10_000_000)throw new Error("Workflow-Snapshot ist ungueltig oder zu gross.");
+    const verified=await this.claim(capability,"workflow_state:append");
+    return this.transaction(verified,async(session)=>{
+      const aggregate=await session.query<{storage_version:string}>("SELECT storage_version FROM builder.workflow_aggregates WHERE project_id=$1 FOR UPDATE",[session.projectId]);
+      if(Number(aggregate.rows[0]?.storage_version)!==expectedStorageVersion)return "VERSION_CONFLICT";
+      if(leaseGuard&&!await workflowLeaseIsValid(session,leaseGuard))return "LEASE_INVALID";
+      const updated=await session.query(`UPDATE builder.workflow_aggregates SET phase=$3,aggregate_version=$4,storage_version=storage_version+1,policy_version=$5,revision_digest=$6,state_snapshot=$7::jsonb WHERE project_id=$1 AND storage_version=$2`,[session.projectId,expectedStorageVersion,projection.project.phase,projection.project.version,projection.project.policyVersion,projection.project.revisionDigest,snapshot]);
+      if(updated.rowCount!==1)return "VERSION_CONFLICT";
+      const emitted=await persistWorkflowProjection(session,projection);
+      if(emitted===0)await appendWorkflowStateMutation(session,verified.subject,snapshot,projection);
+      return "VALID";
+    });
+  }
+
   async [finishCommand](session: ProjectSession, envelope: CommandEnvelope, resultRef: string, duplicate: boolean): Promise<CommandResult> {
     const eventKey=createHash("sha256").update(`${envelope.actorScope}\0${envelope.idempotencyKey}`).digest("hex");
     await session.query(`SELECT builder.append_audit_event($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, [session.projectId,envelope.aggregateType,envelope.aggregateId,envelope.actorIdentityId,envelope.transition,envelope.priorState ?? null,envelope.newState,envelope.reasonCode,envelope.policyVersion,eventKey]);
@@ -231,4 +288,88 @@ async function applyMutation(session: ProjectSession, mutation: EntityMutation, 
     case "inbox_event": await session.query(`INSERT INTO builder.inbox_events(id,project_id,consumer_identity,message_id,status) VALUES ($1,$2,$3,$4,$5)`,[id,session.projectId,mutation.consumerIdentity,mutation.messageId,mutation.status]); break;
   }
   return id;
+}
+
+async function workflowLeaseIsValid(session:ProjectSession,guard:WorkflowLeaseGuard):Promise<boolean>{
+  const row=(await session.query<{status:string;lease_owner:string|null;claim_idempotency_key:string|null;fencing_token:string|null;lease_active:boolean}>(`SELECT status,lease_owner,claim_idempotency_key,fencing_token,
+    lease_expires_at IS NOT NULL AND lease_expires_at > clock_timestamp() lease_active
+    FROM builder.background_jobs WHERE project_id=$1 AND id=$2 FOR UPDATE`,[session.projectId,guard.jobId])).rows[0];
+  return Boolean(row&&guard.allowedStatuses.includes(row.status)&&row.lease_owner===guard.workerId&&row.claim_idempotency_key===guard.claimIdempotencyKey&&Number(row.fencing_token)===guard.fencingToken&&row.lease_active);
+}
+
+const stableUuid=(value:string):string=>{const hex=createHash("sha256").update(value).digest("hex").slice(0,32).split("");hex[12]="4";hex[16]=(["8","9","a","b"] as const)[Number.parseInt(hex[16]!,16)%4]!;return `${hex.slice(0,8).join("")}-${hex.slice(8,12).join("")}-${hex.slice(12,16).join("")}-${hex.slice(16,20).join("")}-${hex.slice(20).join("")}`;};
+const json=(value:unknown):string=>JSON.stringify(value);
+async function assertImmutableRow(session:ProjectSession,sql:string,parameters:readonly unknown[],label:string):Promise<void>{
+  if((await session.query(sql,[...parameters])).rowCount!==1)throw new Error(`Immutable Workflow-Projektion kollidiert: ${label}.`);
+}
+async function persistWorkflowProjection(session:ProjectSession,projection:WorkflowPersistenceProjection):Promise<number>{
+  const projectId=session.projectId;
+  if(projection.project.projectId!==projectId)throw new Error("Workflow-Projektion ist falsch projektgebunden.");
+  await session.query("INSERT INTO builder.workflow_revisions(project_id,aggregate_version,revision_digest,phase) VALUES($1,$2,$3,$4) ON CONFLICT(project_id,aggregate_version) DO NOTHING",[projectId,projection.project.version,projection.project.revisionDigest,projection.project.phase]);
+  await assertImmutableRow(session,"SELECT 1 FROM builder.workflow_revisions WHERE project_id=$1 AND aggregate_version=$2 AND revision_digest=$3 AND phase=$4",[projectId,projection.project.version,projection.project.revisionDigest,projection.project.phase],"workflow_revisions");
+  for(const item of projection.idempotencyRecords){
+    const actorScope=`WORKFLOW_${item.kind}`;const key=createHash("sha256").update(`${item.kind}\0${item.scopeKey}`).digest("hex");
+    await session.query("INSERT INTO builder.idempotency_records(project_id,actor_scope,idempotency_key,request_digest,aggregate_type,aggregate_id,result_ref,status) VALUES($1,$2,$3,$4,'WORKFLOW',$1,$5,'COMPLETED') ON CONFLICT(project_id,actor_scope,idempotency_key) DO NOTHING",[projectId,actorScope,key,item.requestHash,item.resultRef]);
+    await assertImmutableRow(session,"SELECT 1 FROM builder.idempotency_records WHERE project_id=$1 AND actor_scope=$2 AND idempotency_key=$3 AND request_digest=$4 AND result_ref=$5 AND status='COMPLETED'",[projectId,actorScope,key,item.requestHash,item.resultRef],"idempotency_records");
+  }
+
+  const evidence=new Map<string,{kind:string;revisionDigest:string;contentDigest:string;payload:unknown}>();
+  const addEvidence=(kind:string,value:{id:string;revisionDigest:string;contentDigest:string}|undefined)=>{if(value)evidence.set(value.id,{kind,revisionDigest:value.revisionDigest,contentDigest:value.contentDigest,payload:value});};
+  for(const gate of projection.gates)evidence.set(gate.id,{kind:`GATE:${gate.name}`,revisionDigest:gate.subjectRevisionDigest,contentDigest:gate.evidenceDigest,payload:gate});
+  for(const assessment of projection.legalAssessments)addEvidence("LEGAL_ASSESSMENT",assessment.evidence);
+  for(const requirement of projection.legalRequirements){addEvidence("LEGAL_REQUIREMENT_SUBMISSION",requirement.submittedEvidence);addEvidence("LEGAL_REQUIREMENT_DECISION",requirement.verificationEvidence);}
+  for(const decision of projection.counselDecisions)addEvidence("COUNSEL_DECISION",decision.evidence);
+  for(const hold of projection.holds){addEvidence("HOLD_SOURCE",hold.sourceEvidence);addEvidence("HOLD_CLEARANCE",hold.clearingEvidence?.evidenceRef);}
+  for(const item of evidence.values()){
+    const id=(item.payload as {id:string}).id;const payload=json(item.payload);
+    await session.query("INSERT INTO builder.workflow_evidence(project_id,evidence_id,evidence_kind,revision_digest,content_digest,payload) VALUES($1,$2,$3,$4,$5,$6::jsonb) ON CONFLICT(project_id,evidence_id) DO NOTHING",[projectId,id,item.kind,item.revisionDigest,item.contentDigest,payload]);
+    await assertImmutableRow(session,"SELECT 1 FROM builder.workflow_evidence WHERE project_id=$1 AND evidence_id=$2 AND evidence_kind=$3 AND revision_digest=$4 AND content_digest=$5 AND payload=$6::jsonb",[projectId,id,item.kind,item.revisionDigest,item.contentDigest,payload],"workflow_evidence");
+  }
+
+  for(const item of projection.legalAssessments){const payload=json(item);await session.query("INSERT INTO builder.legal_assessments(project_id,assessment_id,status,revision_digest,payload) VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(project_id,assessment_id) DO NOTHING",[projectId,item.id,item.status,item.revisionDigest,payload]);await assertImmutableRow(session,"SELECT 1 FROM builder.legal_assessments WHERE project_id=$1 AND assessment_id=$2 AND status=$3 AND revision_digest=$4 AND payload=$5::jsonb",[projectId,item.id,item.status,item.revisionDigest,payload],"legal_assessments");}
+  for(const item of projection.legalRequirements)await session.query(`INSERT INTO builder.legal_requirements(project_id,requirement_id,assessment_id,state,payload) VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(project_id,requirement_id) DO UPDATE SET state=EXCLUDED.state,payload=EXCLUDED.payload`,[projectId,item.id,item.assessmentId,item.state,json(item)]);
+  for(const item of projection.counselCases)await session.query(`INSERT INTO builder.counsel_cases(project_id,counsel_case_id,assessment_id,state,payload) VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(project_id,counsel_case_id) DO UPDATE SET state=EXCLUDED.state,payload=EXCLUDED.payload`,[projectId,item.id,item.assessmentId,item.state,json(item)]);
+  for(const item of projection.counselDecisions){const payload=json(item);await session.query("INSERT INTO builder.counsel_decisions(project_id,decision_id,counsel_case_id,payload) VALUES($1,$2,$3,$4::jsonb) ON CONFLICT(project_id,decision_id) DO NOTHING",[projectId,item.id,item.counselCaseId,payload]);await assertImmutableRow(session,"SELECT 1 FROM builder.counsel_decisions WHERE project_id=$1 AND decision_id=$2 AND counsel_case_id=$3 AND payload=$4::jsonb",[projectId,item.id,item.counselCaseId,payload],"counsel_decisions");}
+  for(const item of projection.holds)await session.query(`INSERT INTO builder.project_holds(project_id,hold_id,hold_type,state,payload) VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(project_id,hold_id) DO UPDATE SET state=EXCLUDED.state,payload=EXCLUDED.payload`,[projectId,item.id,item.holdType,item.state,json(item)]);
+  const holdIds=new Set(projection.holds.map(item=>item.id));
+  for(const item of projection.holdClearances)if(holdIds.has(item.holdCode)){const payload=json(item);await session.query("INSERT INTO builder.hold_clearances(project_id,clearance_id,hold_id,payload) VALUES($1,$2,$3,$4::jsonb) ON CONFLICT(project_id,clearance_id) DO NOTHING",[projectId,item.id,item.holdCode,payload]);await assertImmutableRow(session,"SELECT 1 FROM builder.hold_clearances WHERE project_id=$1 AND clearance_id=$2 AND hold_id=$3 AND payload=$4::jsonb",[projectId,item.id,item.holdCode,payload],"hold_clearances");}
+
+  const maxFence=Math.max(0,...projection.jobs.map(item=>item.fencingToken??0));
+  await session.query("INSERT INTO builder.workflow_fence_counters(project_id,last_fencing_token) VALUES($1,$2) ON CONFLICT(project_id) DO UPDATE SET last_fencing_token=GREATEST(builder.workflow_fence_counters.last_fencing_token,EXCLUDED.last_fencing_token)",[projectId,maxFence]);
+  for(const item of projection.jobs){
+    const terminalAt=item.completedAt??item.cancelledAt??null;
+    await session.query(`INSERT INTO builder.background_jobs(id,project_id,job_type,aggregate_type,aggregate_id,schema_version,policy_version,idempotency_key,expected_aggregate_version,trace_id,status,claimed_at,claimed_by,terminal_at,phase,revision_digest,operation_scope,lease_owner,claim_idempotency_key,lease_expires_at,fencing_token,workflow_payload)
+      VALUES($1,$2,$3,'WORKFLOW',$2,1,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16,$17,$18,$19::jsonb)
+      ON CONFLICT(project_id,id) DO UPDATE SET status=EXCLUDED.status,claimed_at=EXCLUDED.claimed_at,claimed_by=EXCLUDED.claimed_by,terminal_at=EXCLUDED.terminal_at,phase=EXCLUDED.phase,revision_digest=EXCLUDED.revision_digest,operation_scope=EXCLUDED.operation_scope,lease_owner=EXCLUDED.lease_owner,claim_idempotency_key=EXCLUDED.claim_idempotency_key,lease_expires_at=EXCLUDED.lease_expires_at,fencing_token=EXCLUDED.fencing_token,workflow_payload=EXCLUDED.workflow_payload`,
+      [item.id,projectId,item.type,projection.project.policyVersion,createHash("sha256").update(`workflow-job\0${item.idempotencyKey}`).digest("hex"),item.aggregateVersion,stableUuid(`trace:${item.id}`),item.status,item.claimedAt??null,item.leaseOwner??null,terminalAt,item.phase,item.revisionDigest,json(item.operationScope),item.leaseOwner??null,item.claimIdempotencyKey??null,item.leaseExpiresAt??null,item.fencingToken??null,json(item)]);
+  }
+  for(const item of projection.terminationEvidence){const payload=json(item);await session.query("INSERT INTO builder.termination_evidence(project_id,evidence_id,job_id,payload) VALUES($1,$2,$3,$4::jsonb) ON CONFLICT(project_id,evidence_id) DO NOTHING",[projectId,item.id,item.jobId,payload]);await assertImmutableRow(session,"SELECT 1 FROM builder.termination_evidence WHERE project_id=$1 AND evidence_id=$2 AND job_id=$3 AND payload=$4::jsonb",[projectId,item.id,item.jobId,payload],"termination_evidence");}
+
+  let emitted=0;
+  for(const event of projection.auditEvents){
+    const payload=json(event);
+    if((await session.query("SELECT 1 FROM builder.workflow_transition_details WHERE project_id=$1 AND event_id=$2",[projectId,event.id])).rowCount){await assertImmutableRow(session,"SELECT 1 FROM builder.workflow_transition_details WHERE project_id=$1 AND event_id=$2 AND aggregate_version=$3 AND payload=$4::jsonb",[projectId,event.id,event.sequence,payload],"workflow_transition_details");continue;}
+    const eventKey=createHash("sha256").update(`workflow-transition\0${event.id}`).digest("hex");
+    const audit=(await session.query<{id:string}>("SELECT builder.append_audit_event($1,'WORKFLOW',$1,$2,$3,$4,$5,$6,$7,$8) id",[projectId,event.actorId,`PHASE_${event.newPhase}`,event.previousPhase,event.newPhase,event.reason,event.policyVersion,eventKey])).rows[0]!;
+    await session.query("INSERT INTO builder.workflow_transition_details(project_id,event_id,audit_event_id,aggregate_version,payload) VALUES($1,$2,$3,$4,$5::jsonb)",[projectId,event.id,audit.id,event.sequence,payload]);
+    await appendWorkflowMessageRows(session,projectId,eventKey,"WORKFLOW_TRANSITION",event.id);
+    emitted++;
+  }
+  for(const event of projection.jobEvents){
+    const payload=json(event);const inserted=await session.query("INSERT INTO builder.job_audit_events(project_id,event_id,job_id,event_type,previous_hash,event_hash,payload) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb) ON CONFLICT(project_id,event_id) DO NOTHING",[projectId,event.id,event.jobId,event.type,event.previousHash,event.eventHash,payload]);
+    await assertImmutableRow(session,"SELECT 1 FROM builder.job_audit_events WHERE project_id=$1 AND event_id=$2 AND job_id=$3 AND event_type=$4 AND previous_hash IS NOT DISTINCT FROM $5 AND event_hash=$6 AND payload=$7::jsonb",[projectId,event.id,event.jobId,event.type,event.previousHash,event.eventHash,payload],"job_audit_events");
+    if(inserted.rowCount){await appendWorkflowMessageRows(session,projectId,createHash("sha256").update(`workflow-job-event\0${event.id}`).digest("hex"),`WORKFLOW_JOB_${event.type}`,event.id);emitted++;}
+  }
+  return emitted;
+}
+
+async function appendWorkflowStateMutation(session:ProjectSession,actorId:string,snapshot:string,projection:WorkflowPersistenceProjection):Promise<void>{
+  const digest=createHash("sha256").update(snapshot).digest("hex");const eventKey=createHash("sha256").update(`workflow-state\0${session.projectId}\0${digest}`).digest("hex");
+  await session.query("SELECT builder.append_audit_event($1,'WORKFLOW',$1,$2,'STATE_MUTATED',$3,$3,'PERSISTENT_WORKFLOW_MUTATION',$4,$5)",[session.projectId,actorId,projection.project.phase,projection.project.policyVersion,eventKey]);
+  await appendWorkflowMessageRows(session,session.projectId,eventKey,"WORKFLOW_STATE_MUTATED",`state:${digest}`);
+}
+
+async function appendWorkflowMessageRows(session:ProjectSession,projectId:string,eventKey:string,eventType:string,eventId:string):Promise<void>{
+  await session.query("INSERT INTO builder.outbox_events(project_id,event_type,aggregate_type,aggregate_id,schema_version,policy_version,idempotency_key,status) VALUES($1,$2,'WORKFLOW',$1,1,'workflow-persistence-1',$3,'PENDING') ON CONFLICT(project_id,idempotency_key) DO NOTHING",[projectId,eventType,eventKey]);
+  await session.query("INSERT INTO builder.inbox_events(project_id,consumer_identity,message_id,status,processed_at) VALUES($1,'workflow-repository',$2,'PROCESSED',clock_timestamp()) ON CONFLICT(consumer_identity,message_id) DO NOTHING",[projectId,stableUuid(`inbox:${eventId}`)]);
 }
