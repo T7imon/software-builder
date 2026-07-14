@@ -1,4 +1,4 @@
-Current milestone: POSTGRES-WORKER-TRANSACTION-FIX-01
+Current milestone: PERSISTENT-CANCELLATION-SEMANTICS-01
 Architecture approved: YES
 Implementation enabled: YES
 GitHub integration enabled: NO
