@@ -1,4 +1,4 @@
-Current milestone: WORKER-FAKE-RUNTIME-01
+Current milestone: WORKER-CONCURRENCY-HARDENING-01
 Architecture approved: YES
 Implementation enabled: YES
 GitHub integration enabled: NO
