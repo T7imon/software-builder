@@ -1,4 +1,4 @@
-Current milestone: WORKER-CONCURRENCY-HARDENING-01
+Current milestone: POSTGRES-WORKER-TRANSACTION-FIX-01
 Architecture approved: YES
 Implementation enabled: YES
 GitHub integration enabled: NO
