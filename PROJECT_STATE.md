@@ -1,8 +1,8 @@
-Current milestone: WORKFLOW-PERSISTENCE-COMPLETION-01
+Current milestone: WORKER-FAKE-RUNTIME-01
 Architecture approved: YES
 Implementation enabled: YES
 GitHub integration enabled: NO
 Automatic project execution: NO
 Production deployment: DISABLED
 Release level: DEVELOPMENT_ONLY
-Milestone status: PASSED - DEVELOPMENT ONLY
+Milestone status: BLOCKED - DEVELOPMENT ONLY
