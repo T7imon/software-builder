@@ -29,6 +29,20 @@ Production deployment: `DISABLED`
 
 Dieser Arbeitsvertrag ist nach Task-Beginn unveraenderlich. Nachfolgende Abschnitte duerfen ihn nur ausfuellen, nicht erweitern oder umdeuten.
 
+### 1.1 Unveraenderlicher Formalisierungsvertrag
+
+- Task-ID: `CANCELLATION-CONTRACT-FORMALIZATION-02`.
+- Scope: ausschliesslich formale Praezisierung des bereits akzeptierten Vertrags in diesem Dokument; neue fachliche Anforderungen und Aenderungen der akzeptierten Semantik sind verboten.
+- Pruefbare Akzeptanzkriterien: AC8 ist gemaess Abschnitt 8.1 formal vollstaendig; AT-09, AT-15, AT-16, AT-17, AT-19 und AT-20 enthalten jeweils die 22 Felder aus Abschnitt 10.1; Abschnitt 10.2 ordnet jedes Akzeptanzkriterium, jede Wahrheitstabellenzeile und jede AT-ID widerspruchsfrei zu; im normativen Bereich verbleiben keine undefinierten Begriffe, widerspruechlichen Eventnamen, fehlenden Vorbedingungen, fehlenden negativen Assertions oder Platzhalter.
+- Erlaubte Datei waehrend der Formalisierung: ausschliesslich `docs/architecture/cancellation-contract-decision-01.md`; `PROJECT_STATE.md` darf ausschliesslich nach erfolgreichem Architect-, Security- und Reviewer-PASS durch ausdruecklichen Folgeauftrag aktualisiert werden.
+- Verboten: Anwendungscode, Testcode, Datenbankschema, Migrationen, Completion-ID-Thema, neue Produktanforderungen, Legal-Review, Deployment und Produktion.
+- Writer: genau die Writer-Identitaet `writer` dieses Tasks. Architect, Security und Reviewer arbeiten nach beendetem Writer-Zugriff read-only auf demselben fixierten Stand.
+- Maximales Zeitbudget: 45 Minuten ab Task-Start am 2026-07-14.
+- Reparaturbudget: maximal ein Dokumentations-Reparaturdurchlauf.
+- Abschlussstatus dieser Writer-Phase: `PASSED`, wenn alle vorstehenden Kriterien formal erfuellt sind; andernfalls `BLOCKED` mit reproduzierbarer Evidenz, betroffenem Scope, Repair ordinal und erforderlicher manueller Entscheidung.
+
+Dieser Formalisierungsvertrag ist nach Task-Beginn unveraenderlich. Er ersetzt oder erweitert keine normative fachliche Entscheidung der Abschnitte 2 bis 12.
+
 ## 2. Entscheidung, Geltung und Begriffe
 
 Dieses Dokument ist die normative Architekturentscheidung fuer eine spaetere, neu zu autorisierende Implementierung. Es ersetzt fuer Completion-/Cancellation-Rennen, Termination-Evidence und Cancellation-Recovery jede weniger genaue Aussage in den referenzierten Architekturtexten. Es veraendert den blockierten Implementierungsstand nicht.
@@ -38,6 +52,9 @@ Dieses Dokument ist die normative Architekturentscheidung fuer eine spaetere, ne
 - `Cancellation-Annahme`: die atomare PostgreSQL-Transaktion, die einen noch nicht terminalen Job auf `CANCELLING` setzt und den Cancellation Request als angenommen festschreibt.
 - `Termination-Evidence`: ein strukturierter, verifizierter Nachweis, dass genau die gebundene Runtime-Workload terminal ist. Eine Cancel-Annahme, ein Provider-Acknowledgement oder ein Statusstring allein ist keine Termination-Evidence.
 - `dauerhaft gespeichert`: Die gesamte Transition-Transaktion wurde erfolgreich committed. Ein Lock, ein Update vor Commit oder ein spaeter zurueckgerollter Versuch gewinnt nicht.
+- `CAS-Ergebnis`: `APPLIED` bezeichnet genau einen erfolgreichen autoritativen Commit mit erwarteter Jobversion; `REJECTED_STALE` bezeichnet eine wegen Version, Lease Generation oder Fencing Token abgelehnte Mutation ohne Fachwirkung; `IDEMPOTENT_REPLAY` bezeichnet die unveraenderte Wiedergabe einer bereits committeden Entscheidung.
+- `Gate-Ergebnis`: `PASS - DEVELOPMENT_ONLY` bedeutet, dass der einzelne Akzeptanztest den dokumentierten Entwicklungsvertrag erfuellt. Es ist keine Release-Candidate- oder Produktionsfreigabe. Jedes abweichende Ergebnis ist fuer den jeweiligen Test `BLOCK`.
+- Kanonische AuditEvent-Namen in diesem Vertrag sind `COMPLETED`, `CANCEL_REQUESTED`, `CANCEL_REJECTED`, `LATE_COMPLETION_DISCARDED`, `CANCEL_ATTEMPTED`, `CANCEL_ATTEMPT_FAILED`, `CANCEL_RETRY_SCHEDULED`, `EVIDENCE_VERIFIED`, `EVIDENCE_REJECTED`, `CANCEL_CONFIRMED`, `CANCELLED`, `CANCEL_STUCK`, `RECLAIMED`, `LEASE_LOST` und `PROJECT_HOLD_CLEARED`. `SUCCEEDED`, `CANCEL_REJECTED_TOO_LATE`, `LATE_RESULT_DISCARDED`, `FAILED`, `TIMED_OUT` und `RECOVERY_BUDGET_EXHAUSTED_WITHOUT_VALID_TERMINATION_EVIDENCE` sind Status-, Dispositions- oder Reason Codes und keine abweichenden AuditEvent-Namen.
 
 Die Freigabe dieses Dokuments ist ausschliesslich `DEVELOPMENT_ONLY`. Sie ist weder eine Implementierungsfreigabe fuer den blockierten Vorgaengertask noch eine Release-Candidate- oder Produktionsfreigabe. Production deployment bleibt `DISABLED`.
 
@@ -86,7 +103,7 @@ Nur der Commit in Schritt 5 linearisiert die Ablehnung beziehungsweise Annahme. 
 ### 4.3 Verhalten des Verlierers
 
 - Verliert Cancellation gegen committedes `SUCCEEDED`, bleibt der Job `SUCCEEDED`; es gibt keinen Runtime-Cancel, keinen Retry und keinen Wechsel zu `CANCELLING` oder `CANCELLED`.
-- Verliert Completion gegen committedes `CANCELLING`, wird ein separater idempotenter Discard-Commit ausgefuehrt. Er sperrt die Jobzeile erneut, bestaetigt die Cancellation-Reihenfolge, speichert nur Digest und minimierte Metadaten des spaeten Resultats mit Disposition `LATE_RESULT_DISCARDED`, quarantiniert gegebenenfalls den Payload nach bestehender Retention Policy, schreibt Audit/Inbox/Outbox und veraendert den Jobzustand nicht.
+- Verliert Completion gegen committedes `CANCELLING`, wird ein separater idempotenter Discard-Commit ausgefuehrt. Er sperrt die Jobzeile erneut, bestaetigt die Cancellation-Reihenfolge, speichert nur Digest und minimierte Metadaten des spaeten Resultats mit Disposition `LATE_RESULT_DISCARDED`. Der Payload MUSS GENAU DANN quarantiniert werden, wenn die bestehende Retention Policy diese Disposition der Quarantaene zuordnet. Der Commit schreibt Audit/Inbox/Outbox und veraendert den Jobzustand nicht.
 - Ein CAS-Verlierer darf nur klassifizieren, ablehnen oder discardieren. Er darf die fachliche Transition nicht mit einer neuen Version wiederholen.
 
 ## 5. Gewinnersemantik und monotone Zustaende
@@ -236,6 +253,23 @@ Die Entscheidung lautet exakt:
 
 `CANCEL_STUCK` ist korrekt, wenn Cancellation zuerst angenommen wurde, Runtime-Cancel nicht bestaetigt werden konnte, das Retry-Budget erschoepft ist und keine verifizierbare terminale Evidence existiert. Der Zustand blockiert Task- und Projektfortschritt. Neue Evidence darf weiterhin verifiziert werden und bei Gueltigkeit `CANCELLED` herstellen; eine autorisierte manuelle Entscheidung darf einen spaeteren Recovery-Versuch erlauben, aber niemals Evidence erfinden oder einen terminalen Zustand umschreiben.
 
+### 8.1 AC8 - formales Akzeptanzkriterium fuer `CANCEL_STUCK`
+
+AC8 ist GENAU DANN erfuellt, wenn die Implementierung und die zugeordneten Tests alle folgenden Aussagen gemeinsam belegen:
+
+1. `CANCEL_STUCK` DARF GENAU DANN committed werden, wenn der unter demselben Job-Row-Lock gelesene Job `CANCELLING` ist, der gebundene Cancellation Request dauerhaft `ACCEPTED` ist, dessen Aggregate Sequence vor jeder Completion Sequence liegt, kein autoritatives `SUCCEEDED` oder `CANCELLED` committed ist, das konfigurierte persistente Attempt-Limit erreicht ist und keine passende `VALID` Runtime-Termination-Evidence vorhanden ist.
+2. Vor der Entscheidung MUESSEN alle budgetierten Cancel Attempts mit eindeutiger Operation-ID persistent begonnen und mit einem terminal gespeicherten Attempt-Outcome abgeschlossen sein. Als abgeschlossen gelten `FAILED`, `REJECTED`, `TIMED_OUT` oder ein erfolgreich beantworteter Aufruf ohne verifizierte terminale Evidence. Ein begonnener Attempt ohne terminal gespeichertes Outcome, ein faelliger noch nicht ausgefuehrter Attempt oder ein noch vorhandenes Budget VERBIETET `CANCEL_STUCK`.
+3. Nach Abschluss des letzten budgetierten Attempts MUSS Recovery den aktuellen Runtime-Status abfragen, alle bis zum Query-Watermark eingegangenen Runtime-Events ingestieren und jeden vorhandenen terminalen Evidence-Kandidaten erneut ueber `verify(candidate, expectedContext)` pruefen. Erst nach diesem I/O MUSS Recovery die Jobzeile erneut sperren und die Entscheidung gegen den dann aktuellen Datenbankstand treffen. Runtime-I/O DARF NICHT innerhalb der Row-Lock-Transaktion stattfinden.
+4. Akzeptiert wird ausschliesslich eine persistierte Verifikationsentscheidung `VALID` fuer einen der geschlossenen Evidence-Typen `RUNTIME_TERMINATION_ATTESTATION`, `PROCESS_EXIT_ATTESTATION`, `RUNTIME_TERMINAL_STATUS_ATTESTATION`, `WORKLOAD_NOT_CREATED` oder, nur in `DEVELOPMENT`/`TEST`, `FAKE_RUNTIME_TERMINATION`, wenn alle Bindungen und Pruefungen aus Abschnitt 6 bestanden sind. Ein Statusstring, Cancel-Acknowledgement, Provider-Receipt, erfolgreicher Methoden-Return, fehlender Workload ohne Attestation sowie jede `REJECTED`, manipulierte, nichtterminale, veraltete, scopefremde, generations-/fencefremde, replayte oder nicht verifizierbare Evidence MUSS abgelehnt werden und DARF `CANCELLED` NICHT begruenden.
+5. Die finale Transaktion MUSS `background_jobs` samt Jobstatus, Jobversion, Project-/Jobbindung, Cancellation Request ID und -status, Cancellation- und Completion-Sequence, kanonischer Resultatbindung, Attempt-Anzahl und -Limit, allen terminalen Attempt-Outcomes, `nextRetryAt`, Runtime-Watermark, vorhandenen Evidence-Verifikationsentscheidungen und Consumption-Status, aktuellem Lease Owner, aktueller Lease Generation, Claim-ID und aktuellem Fencing Token lesen. Sie MUSS Jobversion, Zustand, Cancellation Sequence, aktuelle Lease Generation und aktuelles Fencing Token atomar per CAS vergleichen.
+6. Fuer die Transition gilt die aktuelle Lease Generation und das aktuelle Fencing Token des Recovery-Claimants. Eine bereits committede `VALID` Evidence darf nach Abschnitt 6.2 an ihre damalige aktive Generation/Fence gebunden bleiben. Neu eingegangene historische Evidence MUSS zusaetzlich durch den aktuellen Claim verifiziert werden. Der historische Worker DARF NICHT committen.
+7. Bei erfolgreichem CAS MUSS dieselbe Transaktion den Job und die WorkflowExecution auf `CANCEL_STUCK` setzen, die Jobversion und Aggregate Sequence genau einmal erhoehen, den Reason Code `RECOVERY_BUDGET_EXHAUSTED_WITHOUT_VALID_TERMINATION_EVIDENCE`, die Reconciliation-Watermarks und die geprueften Attempt-/Evidence-Referenzen speichern und genau ein AuditEvent `CANCEL_STUCK` schreiben.
+8. Dieselbe Transaktion MUSS die ausloesende Inbox-/Idempotenz-Delivery mit ihrer `CANCEL_STUCK`-Entscheidung abschliessen, jeden noch geplanten automatischen Cancellation-Retry als durch die Stuck-Entscheidung ueberholt markieren und genau die idempotenten Outbox-Wirkungen `CancellationStuck` und `ProjectHold` erzeugen. Replay derselben Delivery MUSS `IDEMPOTENT_REPLAY` liefern und DARF kein zweites AuditEvent, keinen zweiten Hold und keinen weiteren Retry erzeugen.
+9. `CANCEL_STUCK` behauptet weder `CANCELLED` noch `SUCCEEDED`, bindet kein kanonisches Resultat, publiziert kein Erfolgs- oder `JobCancelled`-Event und loest keine Erfolgsobligation aus.
+10. `CANCEL_STUCK` DARF spaeter ausschliesslich durch einen atomaren Row-Lock/CAS-Commit zu `CANCELLED` verlassen werden, der passende `VALID` Evidence konsumiert, oder durch eine ausdruecklich autorisierte manuelle Recovery-Entscheidung zu `CANCELLING`, die einen neuen Recovery-Versuch persistent freigibt. Die manuelle Entscheidung DARF keine Evidence erzeugen und DARF NICHT unmittelbar `CANCELLED` oder `SUCCEEDED` setzen.
+11. Aus `CANCEL_STUCK` sind `SUCCEEDED`, unbelegtes `CANCELLED`, automatische Rueckkehr zu `CANCELLING`, automatischer weiterer Cancel Attempt, Ueberschreiben eines terminalen Zustands und jede Mutation durch alten Owner, alte Lease Generation oder altes Fencing Token ausdruecklich verboten. Aus `SUCCEEDED` oder `CANCELLED` ist ein Uebergang nach `CANCEL_STUCK` ausdruecklich verboten.
+12. Ein CAS-Verlust MUSS `REJECTED_STALE` ohne Teilwirkung liefern. Job, Workflow, Evidence-Consumption, Audit, Inbox, Outbox, Retry-Plan und ProjectHold MUESSEN dann unveraendert bleiben.
+
 ## 9. Wahrheitstabelle
 
 In der Spalte Inbox/Outbox bedeutet `einmal` die bestehende Idempotenzregel; Audit ist immer append-only und projekt-/jobgebunden.
@@ -244,8 +278,8 @@ Die Evidence-Faelle WT-09, WT-10 und WT-16 bis WT-18 gelten sowohl fuer spaetere
 
 | ID | Fall und dauerhafte Ordnung | Autoritativer Zielzustand | Evidence-/Resultatbehandlung | Audit | Inbox/Outbox und Recovery |
 |---|---|---|---|---|---|
-| WT-01 | Completion committed zuerst, Cancel danach | Job `SUCCEEDED`; Workflow auf Erfolgspfad | kanonisches Ergebnis bleibt; keine Termination-Evidence erforderlich | `COMPLETED`, danach `CANCEL_REJECTED`/`CANCEL_REJECTED_TOO_LATE` | Cancel-Inbox als abgelehnt einmal; `CancellationRejectedTooLate`; kein Runtime-Cancel/Retry |
-| WT-02 | Cancellation committed zuerst, Completion danach | `CANCELLING` | Ergebnis-Digest/Metadaten `LATE_RESULT_DISCARDED`, nicht publiziert | `CANCEL_REQUESTED`, `LATE_COMPLETION_DISCARDED`/`LATE_RESULT_DISCARDED` | beide Deliveries einmal; Statusabfrage, Cancel/Recovery nach Budget |
+| WT-01 | Completion committed zuerst, Cancel danach | Job `SUCCEEDED`; Workflow auf Erfolgspfad | kanonisches Ergebnis bleibt; keine Termination-Evidence erforderlich | `COMPLETED`, danach `CANCEL_REJECTED` mit Reason `CANCEL_REJECTED_TOO_LATE` | Cancel-Inbox als abgelehnt einmal; `CancellationRejectedTooLate`; kein Runtime-Cancel/Retry |
+| WT-02 | Cancellation committed zuerst, Completion danach | `CANCELLING` | Ergebnis-Digest/Metadaten `LATE_RESULT_DISCARDED`, nicht publiziert | `CANCEL_REQUESTED`, `LATE_COMPLETION_DISCARDED` mit Disposition `LATE_RESULT_DISCARDED` | beide Deliveries einmal; Statusabfrage, Cancel/Recovery nach Budget |
 | WT-03 | Gleichzeitiger CAS-Wettbewerb, Completion-Commit gewinnt | wie WT-01 | Cancel-CAS verliert und klassifiziert zu spaet | wie WT-01 | wartender Cancel laedt neu; keine blinde CAS-Wiederholung |
 | WT-04 | Gleichzeitiger CAS-Wettbewerb, Cancellation-Commit gewinnt | wie WT-02 | Completion-CAS verliert und fuehrt Discard-Commit aus | wie WT-02 | wartende Completion laedt neu; kein Erfolgs-Retry |
 | WT-05 | Runtime-Cancel liefert erfolgreich gueltige terminale Evidence | `CANCELLED` | Evidence `VALID`, unveraenderbar referenziert | `CANCEL_ATTEMPTED`, `EVIDENCE_VERIFIED`, `CANCEL_CONFIRMED`, `CANCELLED` | Attempt/Response einmal; `JobCancelled`; kein weiterer Retry |
@@ -255,14 +289,14 @@ Die Evidence-Faelle WT-09, WT-10 und WT-16 bis WT-18 gelten sowohl fuer spaetere
 | WT-09 | gueltige passende Termination-Evidence | `CANCELLED` | `VALID`, exakt einmal konsumiert | `EVIDENCE_VERIFIED`, `CANCEL_CONFIRMED`, `CANCELLED` | Evidence-Inbox einmal; `JobCancelled`; Retry entfaellt |
 | WT-10 | schema-ungueltige, manipulierte oder nichtterminale Evidence | Zustand unveraendert (`CANCELLING`/`CANCEL_STUCK`) | `REJECTED` mit konkretem Reason | `EVIDENCE_REJECTED` | Inbox als rejected einmal; kein `JobCancelled`; sicherer Query/Recovery moeglich |
 | WT-11 | keine Evidence vorhanden | `CANCELLING` bei Budget, sonst `CANCEL_STUCK` | keine Evidence-Referenz | Retry- oder `CANCEL_STUCK`-Audit | Statusabfrage; genau ein Retry oder Hold-Outbox-Ereignis |
-| WT-12 | Retry-Limit erreicht, gueltige terminale Evidence vorhanden | `CANCELLED` | Evidence vor Limitentscheidung ausgewertet und konsumiert | `EVIDENCE_VERIFIED`, `CANCELLED`; kein `CANCEL_STUCK` | kein neuer Cancel; `JobCancelled` einmal |
+| WT-12 | Retry-Limit erreicht, gueltige terminale Evidence vorhanden | `CANCELLED` | Evidence vor Limitentscheidung ausgewertet und konsumiert | `EVIDENCE_VERIFIED`, `CANCEL_CONFIRMED`, `CANCELLED`; kein `CANCEL_STUCK` | kein neuer Cancel; `JobCancelled` einmal |
 | WT-13 | Retry-Limit erreicht, keine gueltige terminale Evidence | `CANCEL_STUCK` | keine Cancellation-Behauptung | `CANCEL_STUCK` mit Budget-/Reconciliation-Metadaten | `CancellationStuck`/ProjectHold einmal; manueller/spaeterer Recovery-Pfad offen |
 | WT-14 | verspaetetes Runtime-`SUCCEEDED` nach Cancellation-Annahme | `CANCELLING`, mit gueltiger terminaler Evidence anschliessend `CANCELLED` | Ergebnis `LATE_RESULT_DISCARDED`; terminale Beobachtung separat durch Verifier | `LATE_COMPLETION_DISCARDED`; danach Evidence-Entscheid | kein Erfolgs-Outbox-Event; Status-/Evidence-Recovery statt Completion |
 | WT-15 | Reclaim; alter Worker/Fencing Token mutiert oder liefert unverifizierte Evidence | Zustand unveraendert | alter Kandidat `REJECTED` (`LEASE_GENERATION_MISMATCH`/`FENCING_TOKEN_MISMATCH`) | `LEASE_LOST` oder trusted `EVIDENCE_REJECTED` | stale Inbox/Muation ohne Fachwirkung; aktueller Worker reconciliert |
 | WT-16 | alte Evidence vor Cancellation-Watermark | Zustand unveraendert | `REJECTED`/`STALE` | `EVIDENCE_REJECTED` | kein `JobCancelled`; aktueller Status wird neu abgefragt |
 | WT-17 | scopefremde Evidence (Projekt, Runtime, Run, Job, Workload oder Request) | Zustand unveraendert | passender Scope-Reason, niemals wiedergebunden | `EVIDENCE_REJECTED` | kein fachliches Outbox-Event ausser optionaler Security-Meldung; Recovery bleibt fail-closed |
 | WT-18 | replayte Evidence | bei identischer bereits konsumierter Delivery unveraendert/idempotent; bei anderem Scope unveraendert/rejected | gleiche Consumption wird wiedergegeben; Cross-Scope `REPLAYED` | kein doppeltes `CANCELLED`; Cross-Scope `EVIDENCE_REJECTED` | keine doppelte Outbox; gespeichertes Resultat wird geliefert |
-| WT-19 | doppelter/paralleler identischer Cancel Request | erster Commit entscheidet; Folgelieferungen geben ihn wieder | keine zusaetzliche Evidence | einmal `CANCEL_REQUESTED` oder `CANCEL_REJECTED_TOO_LATE` | eine Inbox-/Idempotenzwirkung, eine Outbox, kein doppelter Attempt |
+| WT-19 | doppelter/paralleler identischer Cancel Request | erster Commit entscheidet; Folgelieferungen geben ihn wieder | keine zusaetzliche Evidence | einmal `CANCEL_REQUESTED` oder `CANCEL_REJECTED` mit Reason `CANCEL_REJECTED_TOO_LATE` | eine Inbox-/Idempotenzwirkung, eine Outbox, kein doppelter Attempt |
 | WT-20 | Crash nach Evidence-Commit, vor `CANCELLED`-Commit | zunaechst `CANCELLING`; Recovery dann `CANCELLED` | bereits `VALID` persistierte Evidence bleibt trotz Reclaim verwertbar | einmal Evidence-Verifikation, spaeter einmal `CANCELLED` | Recovery konsumiert bestehende Evidence; kein erneuter Runtime-Cancel |
 
 ## 10. Nummerierte Akzeptanztests fuer die spaetere Implementierung
@@ -279,23 +313,250 @@ Alle Tests verwenden kontrollierte Transaktionen/Barrieren, echte PostgreSQL-Row
 | AT-06 Runtime-Cancel Fehler | Failure-Commit nach externem Aufruf aus `CANCELLING` | `CANCELLING`; keine Evidence | `CANCEL_ATTEMPT_FAILED`/`FAILED` | Fehler und `nextRetryAt` atomar; ein Retry-Event | vor Retry aktueller Status |
 | AT-07 Runtime-Cancel Timeout | Timeout-Commit aus `CANCELLING` | `CANCELLING`; keine synthetische Evidence | `CANCEL_ATTEMPT_FAILED`/`TIMED_OUT` | unbekanntes Ergebnis und ein Retry-Event | zwingende Statusabfrage, dann erst moeglicher Retry |
 | AT-08 Crash in `CANCELLING` | Crash vor beziehungsweise nach Attempt-Commit getrennt testen; Reclaim-Commit mit neuer Generation | kein uncommitteter Effekt; `CANCELLING` bis Reconciliation | `RECLAIMED`, danach passende Recovery-Events | keine doppelte Inbox/Outbox oder Attempt-Nummer | Statusabfrage, Budget und vorhandene Evidence aus DB laden |
-| AT-09 gueltige Evidence | Evidence-Verifikations- und anschliessender `CANCELLED`-Commit aus `CANCELLING` oder `CANCEL_STUCK` | `CANCELLED`; alle Bindungen/Digest/Issuer/Frische gueltig | `EVIDENCE_VERIFIED`, `CANCELLED` | Evidence einmal konsumiert; `JobCancelled` einmal | Retry wird storniert/ignoriert; bestehender Stuck-Hold wird evidenzgebunden aufgeloest |
+| AT-09 gueltige Evidence | Evidence-Verifikations- und anschliessender `CANCELLED`-Commit aus `CANCELLING` oder `CANCEL_STUCK` | `CANCELLED`; alle Bindungen/Digest/Issuer/Frische gueltig | `EVIDENCE_VERIFIED`, `CANCEL_CONFIRMED`, `CANCELLED` | Evidence einmal konsumiert; `JobCancelled` einmal | aus `CANCELLING` wird ein geplanter Retry ueberholt; aus `CANCEL_STUCK` existiert kein automatischer Retry und der Stuck-Hold wird evidenzgebunden aufgeloest |
 | AT-10 schema-ungueltige Evidence | Rejection-Commit aus `CANCELLING` oder `CANCEL_STUCK` | Ausgangszustand unveraendert; `MALFORMED` | `EVIDENCE_REJECTED` | Inbox rejected; keine Cancelled-Outbox | Statusabfrage/Recovery bleibt erlaubt; Stuck-Hold bleibt aktiv |
 | AT-11 manipulierte Evidence | Digest-/Attestation-Pruefung vor Rejection-Commit aus `CANCELLING` oder `CANCEL_STUCK` | Ausgangszustand unveraendert; `DIGEST_MISMATCH` oder `UNTRUSTED_ISSUER` | `EVIDENCE_REJECTED` | keine Erfolgsoutbox | fail-closed, neuer trusted Query moeglich; Stuck-Hold bleibt aktiv |
 | AT-12 alte Evidence | Frische-/Watermark-Pruefung gegen Cancellation Sequence aus `CANCELLING` oder `CANCEL_STUCK` | Ausgangszustand unveraendert; `STALE` | `EVIDENCE_REJECTED` | keine Erfolgsoutbox | aktuellen Runtime-Status abfragen; Stuck-Hold bleibt aktiv |
 | AT-13 scopefremde Evidence | Scope-Pruefung vor jeder Consumption aus `CANCELLING` oder `CANCEL_STUCK` | Ausgangszustand unveraendert; exakter Scope-Reason | `EVIDENCE_REJECTED` | keine Cross-Project-/Cross-Job-Wirkung | betroffener Job bleibt im eigenen Recovery-Pfad; Stuck-Hold bleibt aktiv |
 | AT-14 replayte Evidence | identische erneute Delivery nach erstem Consumption-Commit und Cross-Scope-Replay aus `CANCELLING`/`CANCEL_STUCK` separat | identischer Scope unveraendert/idempotent beziehungsweise bereits `CANCELLED`; Cross-Scope rejected, Ausgangszustand unveraendert | kein doppeltes `CANCELLED`; Cross-Scope `EVIDENCE_REJECTED` | keine doppelte Outbox; gespeicherte Antwort | kein zusaetzlicher Retry/Attempt; Stuck-Hold bleibt bei rejected Evidence aktiv |
 | AT-15 fehlende Evidence bei Budget | Reconciliation-Commit aus `CANCELLING`, Attempts kleiner Limit | `CANCELLING` | Retry-Planung | genau ein Retry-Outbox-Event | Statusabfrage vor dem geplanten Attempt |
-| AT-16 Retry-Limit mit Evidence | finale Reconciliation sperrt Row; Evidence wird vor Budgetentscheidung gefunden | `CANCELLED`; gueltige Evidence | `EVIDENCE_VERIFIED`, `CANCELLED`, kein `CANCEL_STUCK` | `JobCancelled` einmal | kein weiterer Cancel |
-| AT-17 Retry-Limit ohne Evidence | finale Reconciliation nach Statusquery und Event-Ingestion | `CANCEL_STUCK`; keine Evidence; Task- und Projektfortschritt sind durch den Stuck-Hold blockiert | `CANCEL_STUCK` mit vollstaendiger Checkliste | Hold-/Stuck-Outbox einmal; kein Success-/Cancelled-Event | automatisches Budget endet; Gate bleibt bis neuer gueltiger Evidence oder autorisierter manueller Recovery-Entscheidung geschlossen; manuell darf kein `CANCELLED` behauptet werden |
+| AT-16 Retry-Limit mit Evidence | finale Reconciliation aus `CANCELLING` sperrt die Jobzeile; der autoritative `CANCELLED`-Commit unter CAS linearisiert, nachdem Evidence vor der Budgetentscheidung gefunden wurde | `CANCELLED`; gueltige Evidence | `EVIDENCE_VERIFIED`, `CANCEL_CONFIRMED`, `CANCELLED`, kein `CANCEL_STUCK` | `JobCancelled` einmal | kein weiterer Cancel |
+| AT-17 Retry-Limit ohne Evidence | finale Reconciliation aus `CANCELLING` nach Statusquery und Event-Ingestion; der autoritative `CANCEL_STUCK`-Commit unter Job-Row-Lock/CAS linearisiert | `CANCEL_STUCK`; keine Evidence; Task- und Projektfortschritt sind durch den Stuck-Hold blockiert | `CANCEL_STUCK` mit vollstaendiger Checkliste | Hold-/Stuck-Outbox einmal; kein Success-/Cancelled-Event | automatisches Budget endet; Gate bleibt bis neuer gueltiger Evidence oder autorisierter manueller Recovery-Entscheidung geschlossen; manuell darf kein `CANCELLED` behauptet werden |
 | AT-18 spaetes Runtime-SUCCEEDED | Cancellation ist bereits committed; Runtime-Event wird danach ingestiert | `CANCELLING`, spaeter ggf. `CANCELLED` nur mit verifizierter Termination; Ergebnis discarded | `LATE_COMPLETION_DISCARDED`, Evidence-Entscheid separat | nie ein Erfolgsoutbox-Event | terminale Beobachtung durch Verifier, kein Completion-Retry |
-| AT-19 Reclaim und alter Fence | neuer Reclaim-Commit; danach Mutation und Evidence des alten Workers | unveraendert; alte Mutation rejected, unverified Evidence generation-/fencefremd | `LEASE_LOST`/`EVIDENCE_REJECTED` | keine stale Fachwirkung/Outbox | nur aktueller Claim darf reconciliieren |
-| AT-20 Crash nach Evidence-Verifikation | Evidence-Commit unter alter gueltiger Generation, Crash vor Jobtransition, dann Reclaim | Recovery `CANCELLED`; bereits verifizierte gleiche Evidence erforderlich | keine zweite Verifikation; einmal `CANCELLED` | kein erneuter Runtime-Cancel; `JobCancelled` einmal | bestehende `VALID` Evidence vor Budget/Attempt konsumieren |
+| AT-19 Reclaim und alter Fence | Reclaim-Commit aus `CANCELLING` macht die neue Generation/Fence autoritativ; danach werden Mutation und Evidence des alten Workers am Row-Lock/CAS-Guard abgelehnt | `CANCELLING` unter dem aktuellen Claim unveraendert; alte Mutation rejected, unverified Evidence generation-/fencefremd | `RECLAIMED`, `LEASE_LOST`, `EVIDENCE_REJECTED` | keine stale Fachwirkung/Outbox | nur aktueller Claim darf reconciliieren |
+| AT-20 Crash nach Evidence-Verifikation | Evidence-Commit unter alter gueltiger Generation aus `CANCELLING`, Crash vor Jobtransition, dann Reclaim; der `CANCELLED`-Commit des aktuellen Claims unter Row-Lock/CAS linearisiert | Recovery `CANCELLED`; bereits verifizierte gleiche Evidence erforderlich | idempotente Re-Verifikation ohne zweite persistierte Entscheidung und ohne zweites `EVIDENCE_VERIFIED`; `RECLAIMED`, `CANCEL_CONFIRMED`, einmal `CANCELLED` | kein erneuter Runtime-Cancel; `JobCancelled` einmal | bestehende `VALID` Evidence vor Budget/Attempt gegen aktuellen Context pruefen und konsumieren |
 | AT-21 terminale Monotonie | alte Completion/Cancel-Events gegen je einen committeden `SUCCEEDED`- und `CANCELLED`-Job | terminaler Zustand jeweils unveraendert | nur Rejection/Discard/Stale-Audit | keine gegensaetzliche Outbox | kein Recovery schreibt terminal um |
 | AT-22 FakeRuntime-Verifier-Paritaet | identischer Verifier-Entry-Point wird mit deterministisch gueltigen, schema-ungueltigen, digest-/attestation-manipulierten, alten, projekt-/runtime-/run-/job-/workload-/request-scopefremden und replayten Fake-Kandidaten aus `CANCELLING` und `CANCEL_STUCK` ausgefuehrt | gueltig nur in Development/Test fuehrt wie AT-09 zu `CANCELLED`; jede ungueltige Variante behaelt wie AT-10 bis AT-14 den Ausgangszustand; Release-Candidate-/Production-Profil rejected Fake-Trust immer | je Variante `EVIDENCE_VERIFIED` oder exakter `EVIDENCE_REJECTED`-Reason; nie doppeltes `CANCELLED` | jede Candidate-Delivery idempotent; nur gueltige Dev-Evidence erzeugt einmal `JobCancelled`; ungueltige/replayte Variante nie | gleiche Statusquery-/Recovery-/Hold-Regeln wie AT-09 bis AT-14; Fake-Evidence kann ausschliesslich einen Development-Testjob abschliessen |
-| AT-23 doppelter/paralleler Cancel | zwei identische Requests mit gleicher Message-ID/Idempotency Key und Digest konkurrieren aus `CLAIMED`/`RUNNING`; erster Row-Lock/CAS-Commit linearisiert | genau einmal `CANCELLING`; bei bereits vorher `SUCCEEDED` genau einmal `REJECTED_TOO_LATE`; keine Evidence erforderlich | genau einmal `CANCEL_REQUESTED` oder `CANCEL_REJECTED`/`CANCEL_REJECTED_TOO_LATE` | eine Inbox-/Idempotenzentscheidung und eine fachliche Outbox; Duplikate erhalten gespeicherte Antwort | hoechstens ein Statusquery-/Cancel-Intent und kein doppelter Attempt/Retry |
+| AT-23 doppelter/paralleler Cancel | zwei identische Requests mit gleicher Message-ID/Idempotency Key und Digest konkurrieren aus `CLAIMED`/`RUNNING`; erster Row-Lock/CAS-Commit linearisiert | genau einmal `CANCELLING`; bei bereits vorher `SUCCEEDED` genau einmal `REJECTED_TOO_LATE`; keine Evidence erforderlich | genau einmal `CANCEL_REQUESTED` oder `CANCEL_REJECTED` mit Reason `CANCEL_REJECTED_TOO_LATE` | eine Inbox-/Idempotenzentscheidung und eine fachliche Outbox; Duplikate erhalten gespeicherte Antwort | hoechstens ein Statusquery-/Cancel-Intent und kein doppelter Attempt/Retry |
 
 Jeder Test prueft zusaetzlich: keine Teilwirkung bei Rollback; konsistente Job-/Workflow-/Runtime-Projektion; exakt eine Aggregate Sequence pro fachlicher Transition; keine Resultatpublikation nach Cancellation; sowie Projekt-, Generation- und Fence-Isolation.
+
+### 10.1 Vollstaendige formale Definitionen der beanstandeten Akzeptanztests
+
+Die folgenden Definitionen sind normativ und vervollstaendigen die gleichnamigen Tabellenzeilen. `L=n/F=f` bezeichnet Lease Generation `n` und Fencing Token `f`. Jeder angegebene Endzustand ist der Zustand nach Commit aller in der Ereignisreihenfolge genannten autoritativen Operationen.
+
+#### AT-09 - Gueltige gebundene Evidence beendet Cancellation
+
+1. **Test-ID und Name:** `AT-09 - Gueltige gebundene Evidence beendet Cancellation`.
+2. **Akzeptanzkriterium:** AC3, AC5, AC6 und AC8.
+3. **Initialer persistenter Jobzustand:** Basisvariante C: Job `job-09` ist Version 41, `CANCELLING`; Request `cancel-09` ist `ACCEPTED` bei Cancellation Sequence 90; keine Completion Sequence und kein kanonisches Resultat; Retry 2 von 3 ist geplant. Variante S: derselbe gebundene Request und dieselbe Cancellation Sequence, aber Job Version 42 ist `CANCEL_STUCK`, der Stuck-Hold ist aktiv und es existiert gemaess AC8.8 und AC8.11 kein geplanter oder ausfuehrbarer automatischer Retry.
+4. **Initialer Runtime-Zustand:** gebundene Workload ist terminal `TERMINATED`; Runtime-Watermark 301 ist persistiert.
+5. **Lease Owner:** `recovery-worker-09`.
+6. **Lease Generation:** 8.
+7. **Fencing Token:** 108.
+8. **Vorhandene Evidence:** ein noch nicht konsumierter Kandidat `RUNTIME_TERMINATION_ATTESTATION` bindet Projekt, Runtime, AgentRun, Attempt, `job-09`, `cancel-09`, Workload, Cancellation Sequence 90, `L=8/F=108` und Watermark 301; Digest, Issuer, Attestation, Frische und Environment sind gueltig. Ergebnis ist `VALID`, weder veraltet noch replayt.
+9. **Exakte Ereignisreihenfolge:** Cancellation wurde vor jeder Completion dauerhaft angenommen; Runtime terminiert; Kandidat wird ingestiert und `VALID` committed; Transition sperrt danach `job-09`, vergleicht den aktuellen Stand, konsumiert die Evidence und committed `CANCELLED`. Nur in Basisvariante C wird der geplante Retry im selben Commit als ueberholt markiert; Variante S besitzt keinen automatischen Retry und loest ausschliesslich den evidenzgebundenen Stuck-Hold auf.
+10. **Linearisierungspunkt:** Commit der `CANCELLED`-Transaktion unter `FOR UPDATE` und Jobversions-CAS.
+11. **Ausgefuehrte Operation:** `verify` gefolgt von evidenzgebundener `confirmCancellation`-Transition. Basisvariante C markiert den geplanten Retry atomar als ueberholt. Variante S verarbeitet keinen Retry und loest ausschliesslich den bestehenden Hold evidenzgebunden auf.
+12. **Erwartetes CAS-Ergebnis:** `APPLIED`; eine parallele zweite Consumption liefert `IDEMPOTENT_REPLAY` oder `REJECTED_STALE` ohne zweite Fachwirkung.
+13. **Erwarteter Jobendzustand:** `CANCELLED`, Evidence-Referenz gebunden, kein kanonisches Resultat.
+14. **Erwarteter Runtime-Endzustand:** terminal `TERMINATED`, unveraendert; Evidence-Disposition `CONSUMED`.
+15. **Erwartete AuditEvents:** genau einmal `EVIDENCE_VERIFIED`, `CANCEL_CONFIRMED` und `CANCELLED`; in Variante S zusaetzlich genau einmal `PROJECT_HOLD_CLEARED`, keine zweite Evidence-Verifikation.
+16. **Erwartete InboxEvents:** Evidence-Delivery genau einmal mit der gespeicherten `CANCELLED`-Entscheidung abgeschlossen; Duplikat gibt dieselbe Entscheidung wieder.
+17. **Erwartete OutboxEvents:** genau einmal `JobCancelled`. In Basisvariante C erzeugt der als ueberholt markierte Retry keine weitere Runtime-Operation. Variante S besitzt keinen Retry und loest den bestehenden ProjectHold evidenzgebunden genau einmal auf.
+18. **Retry-/Recovery-Verhalten:** In Basisvariante C wird der geplante Retry atomar als ueberholt markiert; kein weiterer Cancel Attempt wird ausgefuehrt. In Variante S existiert vor und nach der Transition kein automatischer Retry; Evidence-Recovery fuehrt unmittelbar zur evidenzgebundenen `CANCELLED`-Transition und Hold-Aufloesung.
+19. **Verbotene Seiteneffekte:** kein Erfolgs-Event, keine Resultatpublikation, kein zweites Audit-, Inbox-, Outbox- oder Hold-Ereignis, kein Runtime-I/O in der Transition.
+20. **Negative Assertions:** `SUCCEEDED`, `CANCELLING`, `CANCEL_STUCK` nach dem finalen Commit und `CANCELLED` ohne Consumption der `VALID` Evidence sind ausgeschlossen.
+21. **Erforderliche Verifikation:** DB-Assertions fuer Jobversion, Aggregate Sequence, Evidence-Bindungen/Consumption, Audit, Inbox, Outbox und Hold; Replay und parallele Consumption werden separat ausgefuehrt.
+22. **Erwartetes Gate-Ergebnis:** `PASS - DEVELOPMENT_ONLY`; jede fehlende Bindung, Doppelwirkung oder nichtatomare Hold-Aufloesung ist `BLOCK`.
+
+#### AT-15 - Fehlende Evidence bei verbleibendem Budget
+
+1. **Test-ID und Name:** `AT-15 - Fehlende Evidence bei verbleibendem Budget`.
+2. **Akzeptanzkriterium:** AC5 und AC8.
+3. **Initialer persistenter Jobzustand:** `job-15`, Version 51, `CANCELLING`; `cancel-15` `ACCEPTED` bei Sequence 100; Attempt 1 von Limit 3 ist mit `FAILED` abgeschlossen; kein Resultat, keine Completion Sequence, kein geplanter Retry.
+4. **Initialer Runtime-Zustand:** `RUNNING`, Watermark 410.
+5. **Lease Owner:** `recovery-worker-15`.
+6. **Lease Generation:** 11.
+7. **Fencing Token:** 211.
+8. **Vorhandene Evidence:** keine Evidence und kein terminaler Kandidat.
+9. **Exakte Ereignisreihenfolge:** Cancellation hat vor Completion gewonnen; Recovery liest den committeden Attempt; fragt ausserhalb der Transaktion Status `RUNNING` bis Watermark 411 ab; ingestiert keine Evidence; sperrt `job-15`; liest Budget und Guards erneut; plant genau Attempt 2.
+10. **Linearisierungspunkt:** Commit der Retry-Planungs-Transaktion unter Job-Row-Lock/CAS.
+11. **Ausgefuehrte Operation:** persistente Planung des naechsten Statusquery-/Cancel-Attempts mit eindeutiger Operation-ID und `nextRetryAt`.
+12. **Erwartetes CAS-Ergebnis:** `APPLIED`; parallele Planung ist `REJECTED_STALE` oder `IDEMPOTENT_REPLAY`.
+13. **Erwarteter Jobendzustand:** `CANCELLING`, Version und Aggregate Sequence genau einmal erhoeht.
+14. **Erwarteter Runtime-Endzustand:** `RUNNING`; kein Cancel-Aufruf wurde in der Planungs-Transaktion ausgefuehrt.
+15. **Erwartete AuditEvents:** genau einmal `CANCEL_RETRY_SCHEDULED` mit Attempt 2, Limit 3 und Watermark 411.
+16. **Erwartete InboxEvents:** Recovery-Delivery genau einmal als Retry-Planung abgeschlossen.
+17. **Erwartete OutboxEvents:** genau ein idempotenter Runtime-Statusquery-/Cancel-Intent fuer Attempt 2; kein `JobCancelled`, `CancellationStuck` oder Erfolgs-Event.
+18. **Retry-/Recovery-Verhalten:** Attempt 2 darf erst nach `nextRetryAt` und erneuter Statusabfrage ausgefuehrt werden; Attempt 3 und `CANCEL_STUCK` sind noch nicht zulaessig.
+19. **Verbotene Seiteneffekte:** kein `CANCELLED`, `CANCEL_STUCK`, `SUCCEEDED`, ProjectHold, Resultat oder unmittelbarer Runtime-Cancel innerhalb der DB-Transaktion.
+20. **Negative Assertions:** keine Evidence-Referenz; keine doppelte Attempt-Nummer, Inbox-, Outbox- oder Auditwirkung; alter Owner/Fence kann nicht planen.
+21. **Erforderliche Verifikation:** DB-Assertions fuer Status, Version, Attempt 2, Operation-ID, `nextRetryAt`, Watermark, Audit/Inbox/Outbox sowie parallele Replay-Probe.
+22. **Erwartetes Gate-Ergebnis:** `PASS - DEVELOPMENT_ONLY`; ein vorzeitiges `CANCEL_STUCK` oder ein doppelter Retry ist `BLOCK`.
+
+#### AT-16 - Retry-Limit mit vorliegender gueltiger Evidence
+
+1. **Test-ID und Name:** `AT-16 - Retry-Limit mit vorliegender gueltiger Evidence`.
+2. **Akzeptanzkriterium:** AC3, AC5 und AC8.
+3. **Initialer persistenter Jobzustand:** `job-16`, Version 61, `CANCELLING`; `cancel-16` `ACCEPTED` bei Sequence 120; drei von drei Attempts terminal gespeichert; kein Completion-Commit, kein Resultat.
+4. **Initialer Runtime-Zustand:** terminal `TERMINATED`, Watermark 501.
+5. **Lease Owner:** `recovery-worker-16`.
+6. **Lease Generation:** 12.
+7. **Fencing Token:** 312.
+8. **Vorhandene Evidence:** persistierter, nicht konsumierter `VALID`-Entscheid fuer `PROCESS_EXIT_ATTESTATION`, exakt an `job-16`, `cancel-16`, Workload, Sequence 120 und die gueltige damalige `L=11/F=311` gebunden; nach Abschnitt 6.2 weiter verwertbar, nicht veraltet und nicht replayt.
+9. **Exakte Ereignisreihenfolge:** Cancellation gewann; letzter Attempt wurde committed; Runtime-Statusquery bestaetigt Watermark 501; Recovery findet und prueft die vorhandene terminale Evidence vor der Budgetentscheidung erneut; aktueller Claim sperrt die Zeile und committed Evidence-Consumption plus `CANCELLED`.
+10. **Linearisierungspunkt:** Commit der evidenzgebundenen `CANCELLED`-Transition unter Row-Lock/CAS, nicht das Erreichen des Limits.
+11. **Ausgefuehrte Operation:** finale Reconciliation und Consumption bereits persistierter `VALID` Evidence.
+12. **Erwartetes CAS-Ergebnis:** `APPLIED` unter `L=12/F=312`.
+13. **Erwarteter Jobendzustand:** `CANCELLED`; niemals `CANCEL_STUCK`.
+14. **Erwarteter Runtime-Endzustand:** terminal `TERMINATED`; Evidence `CONSUMED`.
+15. **Erwartete AuditEvents:** im gesamten Testverlauf genau einmal `EVIDENCE_VERIFIED`, danach genau einmal `CANCEL_CONFIRMED` und `CANCELLED`; kein `CANCEL_STUCK`.
+16. **Erwartete InboxEvents:** finale Recovery-/Evidence-Delivery genau einmal als `CANCELLED` abgeschlossen.
+17. **Erwartete OutboxEvents:** genau einmal `JobCancelled`; kein `CancellationStuck`, ProjectHold oder weiterer Cancel-Intent.
+18. **Retry-/Recovery-Verhalten:** kein weiterer Cancel Attempt; Budgetentscheidung wird durch gueltige Evidence beendet.
+19. **Verbotene Seiteneffekte:** keine Stuck-Transition, kein Hold, kein Erfolgs-Event, keine Wiederverifikation durch den alten Worker.
+20. **Negative Assertions:** Limiterschoepfung darf `VALID` Evidence nicht uebergehen; historische, aber gueltig committede Evidence wird nicht allein wegen Reclaim abgelehnt.
+21. **Erforderliche Verifikation:** kontrollierter Crash-/Reclaim-Kontext, Bindungs-/Frischepruefung, DB-Assertions fuer Consumption, CAS, Audit, Inbox und Outbox.
+22. **Erwartetes Gate-Ergebnis:** `PASS - DEVELOPMENT_ONLY`; `CANCEL_STUCK` trotz passender `VALID` Evidence ist `BLOCK`.
+
+#### AT-17 - Retry-Limit ohne verifizierbare Evidence
+
+1. **Test-ID und Name:** `AT-17 - Retry-Limit ohne verifizierbare Evidence`.
+2. **Akzeptanzkriterium:** AC5 und AC8.
+3. **Initialer persistenter Jobzustand:** `job-17`, Version 71, `CANCELLING`; `cancel-17` `ACCEPTED` bei Sequence 130; Attempts 1 bis 3 von Limit 3 besitzen terminale Outcomes `FAILED`, `TIMED_OUT`, `REJECTED`; keine Completion Sequence, kein Resultat.
+4. **Initialer Runtime-Zustand:** letzte verifizierbare Beobachtung `RUNNING`, Watermark 601; Termination ist nicht bewiesen.
+5. **Lease Owner:** `recovery-worker-17`.
+6. **Lease Generation:** 14.
+7. **Fencing Token:** 414.
+8. **Vorhandene Evidence:** kein `VALID`-Entscheid; ein Statusstring `CANCELLED` und ein Provider-Receipt liegen vor, sind aber keine Evidence und werden abgelehnt.
+9. **Exakte Ereignisreihenfolge:** Cancellation gewann; alle drei Attempts wurden terminal committed; nach Attempt 3 fragt Recovery Status ab, ingestiert das Receipt und den Statusstring ohne sie als Evidence zu akzeptieren; sperrt die Jobzeile erneut; vergleicht alle AC8-Felder; committed `CANCEL_STUCK`.
+10. **Linearisierungspunkt:** Commit der `CANCEL_STUCK`-Transition unter Row-Lock/CAS nach der finalen Status-/Evidence-Reconciliation.
+11. **Ausgefuehrte Operation:** finale Budget- und Evidence-Entscheidung gemaess AC8.
+12. **Erwartetes CAS-Ergebnis:** `APPLIED`; ein konkurrierender alter Claim ist `REJECTED_STALE` ohne Teilwirkung.
+13. **Erwarteter Jobendzustand:** `CANCEL_STUCK`, kein kanonisches Resultat, Stuck-Hold aktiv.
+14. **Erwarteter Runtime-Endzustand:** letzte verifizierbare Beobachtung bleibt `RUNNING`; die Jobtransition behauptet weder Termination noch spaetere Fortsetzung.
+15. **Erwartete AuditEvents:** genau einmal `CANCEL_STUCK` mit Reason `RECOVERY_BUDGET_EXHAUSTED_WITHOUT_VALID_TERMINATION_EVIDENCE`, Attempt-Referenzen und Watermark 601; Statusstring und Receipt erzeugen kein `EVIDENCE_REJECTED`, weil sie keine Evidence-Kandidaten sind.
+16. **Erwartete InboxEvents:** finale Recovery-Delivery genau einmal mit `CANCEL_STUCK` abgeschlossen; Replay ist `IDEMPOTENT_REPLAY`.
+17. **Erwartete OutboxEvents:** genau einmal `CancellationStuck` und `ProjectHold`; kein `JobCancelled`, Erfolgs-Event oder weiterer automatischer Cancel-Intent.
+18. **Retry-/Recovery-Verhalten:** automatisches Budget endet. Verlassen ist nur mit spaeter `VALID` Evidence nach `CANCELLED` oder autorisierter manueller Recovery nach `CANCELLING` erlaubt.
+19. **Verbotene Seiteneffekte:** kein synthetisches `CANCELLED`, kein `SUCCEEDED`, kein Resultat, kein vierter automatischer Attempt, keine Hold-Aufloesung.
+20. **Negative Assertions:** Statusstring und Receipt sind nicht Evidence; `CANCEL_STUCK` behauptet keine Termination; ein terminaler Job darf nicht zu `CANCEL_STUCK` wechseln.
+21. **Erforderliche Verifikation:** DB-Assertions fuer alle AC8-Vorbedingungen, CAS, Version/Sequence, Reason, Audit/Inbox/Outbox/Hold; Replay, stale Fence und spaet eintreffende gueltige Evidence werden separat geprueft.
+22. **Erwartetes Gate-Ergebnis:** `PASS - DEVELOPMENT_ONLY`; unbelegtes `CANCELLED`, fehlende finale Reconciliation oder vierter automatischer Attempt ist `BLOCK`.
+
+#### AT-19 - Reclaim fenced alten Worker und alte Evidence
+
+1. **Test-ID und Name:** `AT-19 - Reclaim fenced alten Worker und alte Evidence`.
+2. **Akzeptanzkriterium:** AC1, AC5, AC6 und AC8.
+3. **Initialer persistenter Jobzustand:** `job-19`, Version 81, `CANCELLING`; `cancel-19` `ACCEPTED` bei Sequence 150; Attempt 1 von 3 abgeschlossen; kein Resultat.
+4. **Initialer Runtime-Zustand:** `RUNNING`, Watermark 701; alter Worker besitzt lokal einen uncommitted terminalen Kandidaten.
+5. **Lease Owner:** initial `old-worker-19`, nach Reclaim `recovery-worker-19`.
+6. **Lease Generation:** initial 20, danach aktuell 21.
+7. **Fencing Token:** initial 520, danach aktuell 521.
+8. **Vorhandene Evidence:** Kandidat des alten Workers bindet `L=20/F=520`, besitzt keine vor Reclaim committede `VALID`-Entscheidung und ist damit fuer eine Mutation durch den alten Worker veraltet; Verifier-Resultat unter dem aktuellen Kontext ist `REJECTED` mit `LEASE_GENERATION_MISMATCH` oder `FENCING_TOKEN_MISMATCH`.
+9. **Exakte Ereignisreihenfolge:** Cancellation gewann; alte Lease endet; neuer Worker committed Reclaim auf `L=21/F=521`; danach versucht der alte Worker Completion, Evidence-Ingestion und Cancellation-Confirmation; anschliessend klassifiziert der aktuelle Worker den Kandidaten und reconciliert.
+10. **Linearisierungspunkt:** Reclaim-Commit legt den aktuellen Claim fest; jeder spaetere Mutationsversuch linearisiert nur als Ablehnung am Row-Lock/CAS-Guard.
+11. **Ausgefuehrte Operation:** Reclaim, drei stale Mutationsversuche, aktuelle Evidence-Rejection und Recovery-Planung.
+12. **Erwartetes CAS-Ergebnis:** Reclaim `APPLIED`; alle alten Mutationen `REJECTED_STALE`; aktuelle Rejection/Recovery genau einmal `APPLIED`.
+13. **Erwarteter Jobendzustand:** `CANCELLING` unter `recovery-worker-19`, `L=21/F=521`; kein Resultat und keine Evidence-Consumption.
+14. **Erwarteter Runtime-Endzustand:** letzte autoritative Beobachtung `RUNNING`; alter lokaler Kandidat `REJECTED`.
+15. **Erwartete AuditEvents:** genau einmal `RECLAIMED`; stale Mutation `LEASE_LOST` nach der trusted Klassifikation und genau einmal `EVIDENCE_REJECTED` mit exaktem Generation-/Fence-Reason; kein `COMPLETED`, `CANCELLED` oder `CANCEL_STUCK`.
+16. **Erwartete InboxEvents:** stale Deliveries werden ohne Fachwirkung als abgelehnt abgeschlossen; aktuelle Recovery-Delivery genau einmal.
+17. **Erwartete OutboxEvents:** keine stale Fachwirkung; hoechstens genau ein aktueller Recovery-/Statusquery-Intent, kein Erfolg oder `JobCancelled`.
+18. **Retry-/Recovery-Verhalten:** ausschliesslich `recovery-worker-19` darf mit aktuellem Claim Budget und Runtime-Status reconciliieren.
+19. **Verbotene Seiteneffekte:** kein Commit durch alten Owner, keine Cross-Generation-Consumption, keine Resultatpublikation, kein doppelter Attempt/Retry.
+20. **Negative Assertions:** lokales Resultat oder lokaler Kandidat des alten Workers kann weder `SUCCEEDED` noch `CANCELLED` setzen; Reclaim allein erzeugt keine Termination-Evidence.
+21. **Erforderliche Verifikation:** zwei kontrollierte DB-Sessions und Barrieren; Assertions fuer Claim/Fence, CAS-Rollback, Job/Resultat/Evidence/Audit/Inbox/Outbox vor und nach jedem Versuch.
+22. **Erwartetes Gate-Ergebnis:** `PASS - DEVELOPMENT_ONLY`; jede stale Fachwirkung oder Evidence-Consumption ist `BLOCK`.
+
+#### AT-20 - Crash nach Evidence-Verifikation vor Cancellation-Commit
+
+1. **Test-ID und Name:** `AT-20 - Crash nach Evidence-Verifikation vor Cancellation-Commit`.
+2. **Akzeptanzkriterium:** AC3, AC5, AC6 und AC8.
+3. **Initialer persistenter Jobzustand:** `job-20`, Version 91, `CANCELLING`; `cancel-20` `ACCEPTED` bei Sequence 170; Attempt 3 von 3 abgeschlossen; keine Completion Sequence, kein Resultat.
+4. **Initialer Runtime-Zustand:** terminal `TERMINATED`, Watermark 801.
+5. **Lease Owner:** vor Crash `old-worker-20`, nach Reclaim `recovery-worker-20`.
+6. **Lease Generation:** Evidence wurde gueltig unter 30 verifiziert; aktueller Reclaim hat Generation 31.
+7. **Fencing Token:** Evidence wurde gueltig unter 630 verifiziert; aktueller Fence ist 631.
+8. **Vorhandene Evidence:** `PROCESS_EXIT_ATTESTATION` ist vor dem Crash append-only mit `VALID`, Digest, allen Scope-Bindungen, Cancellation Sequence 170 und `L=30/F=630` committed, aber noch nicht konsumiert; sie ist gueltig, nicht replayt und nach Abschnitt 6.2 weiter verwertbar.
+9. **Exakte Ereignisreihenfolge:** Cancellation gewann; letzter Attempt endete; alter Worker committed die Verifikationsentscheidung; crasht vor Jobtransition; Lease endet; neuer Worker committed Reclaim; fragt Status ab; laedt den unveraenderten Evidence-Kandidaten und die bestehende `VALID`-Entscheidung vor der Budgetentscheidung; ruft denselben Verifier mit dem aktuellen `expectedContext` auf; der Verifier prueft Kandidat, gespeicherte Entscheidung, Scope, Cancellation Sequence, historische Bindung sowie aktuelle Reclaim-Berechtigung erneut und liefert idempotent dieselbe `VALID`-Entscheidung mit identischer Evidence-ID und identischem Digest; danach sperrt der aktuelle Worker `job-20`, konsumiert die Evidence genau einmal und committed `CANCELLED`.
+10. **Linearisierungspunkt:** erst der `CANCELLED`-Commit des aktuellen Workers unter Row-Lock/CAS; Evidence-Commit allein ist kein Jobzustandswechsel.
+11. **Ausgefuehrte Operation:** Crash-Recovery, Reclaim, verpflichtende idempotente Re-Verifikation des vorhandenen Kandidaten gegen den aktuellen Context und anschliessende einmalige Consumption der bereits gueltig persistenten Evidence. Die Re-Verifikation erzeugt keine zweite persistierte Verifikationsentscheidung.
+12. **Erwartetes CAS-Ergebnis:** Evidence-Commit und Reclaim jeweils `APPLIED`; finaler `CANCELLED`-Commit `APPLIED` unter `L=31/F=631`; alter Worker danach `REJECTED_STALE`.
+13. **Erwarteter Jobendzustand:** `CANCELLED`, Evidence-Referenz konsumiert; niemals `CANCEL_STUCK`.
+14. **Erwarteter Runtime-Endzustand:** terminal `TERMINATED`, Watermark mindestens 801.
+15. **Erwartete AuditEvents:** im gesamten Testverlauf genau einmal `EVIDENCE_VERIFIED`, `RECLAIMED`, `CANCEL_CONFIRMED` und `CANCELLED`; die idempotente Re-Verifikation erzeugt kein zweites AuditEvent `EVIDENCE_VERIFIED`; kein `CANCEL_STUCK`.
+16. **Erwartete InboxEvents:** ursprüngliche Evidence-Delivery bleibt mit ihrem `VALID`-Entscheid abgeschlossen; Recovery-Delivery wird genau einmal als `CANCELLED` abgeschlossen.
+17. **Erwartete OutboxEvents:** genau einmal `JobCancelled`; kein erneuter Runtime-Cancel, `CancellationStuck`, Hold oder Erfolgs-Event.
+18. **Retry-/Recovery-Verhalten:** Recovery MUSS den bestehenden Kandidaten vor Limit-/Attempt-Entscheidung ueber denselben Verifier gegen den aktuellen Context idempotent erneut pruefen und die bestaetigte bestehende `VALID`-Entscheidung danach konsumieren; kein vierter Attempt.
+19. **Verbotene Seiteneffekte:** keine Ablehnung nur wegen Reclaim, keine zweite persistierte Verifikationsentscheidung, kein zweites `EVIDENCE_VERIFIED`-AuditEvent, keine zweite Consumption, kein Stuck-Hold, kein Resultat. Die durch AC8.3 verlangte idempotente Re-Verifikation selbst ist ausdruecklich erforderlich und nicht verboten.
+20. **Negative Assertions:** Evidence-Commit allein setzt Job nicht `CANCELLED`; Crash verliert committede Evidence nicht; alter Worker darf nach Reclaim nicht transitionieren.
+21. **Erforderliche Verifikation:** deterministischer Crashpunkt zwischen Evidence- und Jobcommit, neuer Claim, Nachweis des erneuten Aufrufs desselben Verifiers mit aktuellem `expectedContext` und identischer Rueckgabeentscheidung sowie DB-Assertions, dass Evidence-Entscheidungszeile, `EVIDENCE_VERIFIED`-Audit, Generation/Fence, Consumption, Inbox und Outbox keine Doppelwirkung besitzen.
+22. **Erwartetes Gate-Ergebnis:** `PASS - DEVELOPMENT_ONLY`; `CANCEL_STUCK`, vierter Attempt oder verlorene/zweifach konsumierte Evidence ist `BLOCK`.
+
+### 10.2 Vollstaendige Traceability-Matrix
+
+#### Akzeptanzkriterien zu positiven und negativen Tests
+
+| Akzeptanzkriterium | Positive Tests | Negative Tests |
+|---|---|---|
+| AC1 gemeinsame Row-Lock-/CAS-Linearisierung | AT-01, AT-02, AT-03, AT-04 | AT-03, AT-04, AT-21 |
+| AC2 Gewinnerfolgen fuer Completion/Cancellation | AT-01, AT-02 | AT-18, AT-21 |
+| AC3 strukturierte verifizierte Evidence | AT-05, AT-09, AT-16, AT-20 | AT-10, AT-11, AT-12, AT-13, AT-14, AT-22 |
+| AC4 FakeRuntime-Paritaet und Trust-Grenze | AT-22 | AT-22 mit jeder ungueltigen Variante und Production-Profil |
+| AC5 Fehler, Timeout, Recovery und `CANCEL_STUCK` | AT-06, AT-07, AT-08, AT-15, AT-16, AT-17, AT-20 | AT-07, AT-17, AT-19 |
+| AC6 terminale Monotonie | AT-21 | AT-18, AT-19, AT-21 |
+| AC7 vollstaendige Wahrheitstabelle | AT-01 bis AT-20 und AT-23 | AT-03, AT-04, AT-10 bis AT-14, AT-19, AT-21, AT-22 |
+| AC8 formal vollstaendige Akzeptanztests | AT-01 bis AT-23; insbesondere AT-09, AT-15, AT-16, AT-17, AT-19, AT-20 | AT-10 bis AT-14, AT-17, AT-19, AT-21, AT-22 |
+| AC9 gemeinsamer Review-Gate-Ausgang | positive Suite AT-01 bis AT-23 auf einem fixierten Digest plus Architect-, Reviewer- und Security-PASS | jede Abweichung eines Tests oder Reviews ergibt `BLOCK` |
+
+AC8 wird insbesondere durch die positiven Evidence-/Recovery-Faelle AT-09, AT-15, AT-16 und AT-20 sowie durch die fail-closed Faelle AT-10 bis AT-14, AT-17, AT-19, AT-21 und AT-22 abgedeckt. AT-16 und AT-20 beweisen, dass `VALID` Evidence vor der Retry-Limit-Entscheidung gewinnt; AT-17 beweist `CANCEL_STUCK` GENAU DANN ohne solche Evidence; AT-15 beweist, dass verbleibendes Budget `CANCEL_STUCK` verbietet.
+
+#### Wahrheitstabellenzeilen zu Akzeptanztests
+
+| Wahrheitstabellenzeile | AT-ID | Dauerhafter Gewinner und Ziel |
+|---|---|---|
+| WT-01 | AT-01 | Completion; `SUCCEEDED`, danach `CANCEL_REJECTED_TOO_LATE` |
+| WT-02 | AT-02 | Cancellation; `CANCELLING`, `LATE_RESULT_DISCARDED` |
+| WT-03 | AT-03 | Completion-CAS; `SUCCEEDED` |
+| WT-04 | AT-04 | Cancellation-CAS; `CANCELLING` |
+| WT-05 | AT-05 | Cancellation plus `VALID` Evidence; `CANCELLED` |
+| WT-06 | AT-06 | Cancellation bleibt wirksam; `CANCELLING` |
+| WT-07 | AT-07 | Cancellation bleibt wirksam; `CANCELLING` |
+| WT-08 | AT-08 | Cancellation bleibt wirksam; `CANCELLING` bis Reconciliation |
+| WT-09 | AT-09 | Cancellation plus `VALID` Evidence; `CANCELLED` |
+| WT-10 | AT-10, AT-11 | Cancellation bleibt wirksam; Ausgangszustand unveraendert |
+| WT-11 | AT-15, AT-17 | bei Budget `CANCELLING`, ohne Budget `CANCEL_STUCK` |
+| WT-12 | AT-16 | `VALID` Evidence gewinnt vor Limit; `CANCELLED` |
+| WT-13 | AT-17 | Cancellation ohne Evidence nach Limit; `CANCEL_STUCK` |
+| WT-14 | AT-18 | Cancellation; `CANCELLING`, Resultat `LATE_RESULT_DISCARDED` |
+| WT-15 | AT-19 | aktueller Reclaim; `CANCELLING`, stale Wirkung abgelehnt |
+| WT-16 | AT-12 | Cancellation bleibt wirksam; Ausgangszustand unveraendert |
+| WT-17 | AT-13 | Cancellation bleibt wirksam; Ausgangszustand unveraendert |
+| WT-18 | AT-14 | erste Consumption; identischer Replay idempotent, Cross-Scope rejected |
+| WT-19 | AT-23 | erster Cancel- oder vorheriger Completion-Commit; gespeicherte Entscheidung unveraendert |
+| WT-20 | AT-20 | Cancellation plus committede `VALID` Evidence; `CANCELLED` |
+
+#### Jede AT-ID zu eindeutigem Zielzustand und Gate-Ausgang
+
+| AT-ID | Exakt definierter Zielzustand | Erwarteter Gate-Ausgang |
+|---|---|---|
+| AT-01 | `SUCCEEDED`; Request `REJECTED_TOO_LATE` | `PASS - DEVELOPMENT_ONLY` |
+| AT-02 | `CANCELLING`; Resultat `LATE_RESULT_DISCARDED` | `PASS - DEVELOPMENT_ONLY` |
+| AT-03 | `SUCCEEDED`; Cancel-CAS ohne Fachwirkung | `PASS - DEVELOPMENT_ONLY` |
+| AT-04 | `CANCELLING`; Completion discarded | `PASS - DEVELOPMENT_ONLY` |
+| AT-05 | `CANCELLED` mit konsumierter `VALID` Evidence | `PASS - DEVELOPMENT_ONLY` |
+| AT-06 | `CANCELLING` | `PASS - DEVELOPMENT_ONLY` |
+| AT-07 | `CANCELLING` | `PASS - DEVELOPMENT_ONLY` |
+| AT-08 | `CANCELLING` bis nachfolgender evidenz-/budgetabhaengiger Reconciliation | `PASS - DEVELOPMENT_ONLY` |
+| AT-09 | `CANCELLED` aus `CANCELLING`; Variante S `CANCELLED` aus `CANCEL_STUCK` | `PASS - DEVELOPMENT_ONLY` |
+| AT-10 | jeweiliger initialer `CANCELLING`- oder `CANCEL_STUCK`-Zustand unveraendert | `PASS - DEVELOPMENT_ONLY` |
+| AT-11 | jeweiliger initialer `CANCELLING`- oder `CANCEL_STUCK`-Zustand unveraendert | `PASS - DEVELOPMENT_ONLY` |
+| AT-12 | jeweiliger initialer `CANCELLING`- oder `CANCEL_STUCK`-Zustand unveraendert | `PASS - DEVELOPMENT_ONLY` |
+| AT-13 | jeweiliger initialer `CANCELLING`- oder `CANCEL_STUCK`-Zustand unveraendert | `PASS - DEVELOPMENT_ONLY` |
+| AT-14 | Same-Scope-Replay bleibt `CANCELLED`; Cross-Scope-Variante behaelt ihren initialen `CANCELLING`- oder `CANCEL_STUCK`-Zustand | `PASS - DEVELOPMENT_ONLY` |
+| AT-15 | `CANCELLING`, Attempt 2 geplant | `PASS - DEVELOPMENT_ONLY` |
+| AT-16 | `CANCELLED`, kein `CANCEL_STUCK` | `PASS - DEVELOPMENT_ONLY` |
+| AT-17 | `CANCEL_STUCK` | `PASS - DEVELOPMENT_ONLY` |
+| AT-18 | `CANCELLING`; Resultat `LATE_RESULT_DISCARDED` | `PASS - DEVELOPMENT_ONLY` |
+| AT-19 | `CANCELLING` unter aktuellem Claim; stale Wirkungen abgelehnt | `PASS - DEVELOPMENT_ONLY` |
+| AT-20 | `CANCELLED` mit der vor Crash committeden `VALID` Evidence | `PASS - DEVELOPMENT_ONLY` |
+| AT-21 | initial `SUCCEEDED` beziehungsweise `CANCELLED` jeweils unveraendert | `PASS - DEVELOPMENT_ONLY` |
+| AT-22 | gueltige Dev/Test-Variante `CANCELLED`; jede ungueltige Variante behaelt ihren initialen Zustand | `PASS - DEVELOPMENT_ONLY` |
+| AT-23 | erster Commit: `CANCELLING` oder, bei vorherigem Completion-Commit, `SUCCEEDED` plus `REJECTED_TOO_LATE` | `PASS - DEVELOPMENT_ONLY` |
+
+Die AT-IDs bilden die lueckenlose Menge `AT-01` bis `AT-23`; jede ID ist genau einmal als primaere Tabellenzeile vergeben. Varianten innerhalb einer ID sind durch ihren initialen Zustand getrennt und besitzen oben jeweils einen eindeutigen Zielzustand. Keine Variante erlaubt einen anderen dauerhaften Gewinner als die zugeordnete Wahrheitstabellenzeile.
 
 ## 11. Dokumentierte Auswirkungen auf eine spaetere Implementierung
 
@@ -369,3 +630,23 @@ Ausgefuehrte Pruefungen:
 Abschlussstatus: `BLOCKED`.
 
 `CANCELLATION CONTRACT NEEDS OWNER DECISION`
+
+## 14. Formalisierungsprotokoll `CANCELLATION-CONTRACT-FORMALIZATION-02`
+
+Dieser Abschnitt protokolliert den neuen, vom historischen Abschluss in Abschnitt 13 getrennten Formalisierungs-Task. Er gehoert nicht zum Hashbereich der normativen Abschnitte 1 bis 12.
+
+- Abschlussstatus: `PASSED`.
+- Writer-Identitaet: ausschliesslich `writer`; Writer-Zugriff ist mit dieser Abschlussdokumentation beendet.
+- Repair ordinal: `1/1`; der einzige zulaessige Dokumentations-Reparaturdurchlauf wurde fuer die eindeutige Trennung des AT-09-Retry-Verhaltens und der idempotenten AT-20-Re-Verifikation verbraucht.
+- Gepruefter normativer Stand: Abschnitte 1 bis 12, beginnend mit Byte 0 und endend unmittelbar vor der Zeile `## 13. Review- und Abschlussprotokoll`.
+- Kanonisierung fuer den Digest: UTF-8 ohne BOM; Zeilenenden auf LF normalisiert; der Endstand des Hashbereichs einschliesslich der Leerzeilen unmittelbar vor Abschnitt 13 wird verwendet.
+- SHA-256 des normativen Vertrags: `58e44fe0a3638d25bdf34dc5aff8551872796486c343904923cb4f41150a4b9f`.
+- Formale Eigenpruefung: AT-09, AT-15, AT-16, AT-17, AT-19 und AT-20 besitzen jeweils exakt 22 nummerierte Felder; die primaere AT-Menge ist lueckenlos und eindeutig `AT-01` bis `AT-23`; alle 20 Wahrheitstabellenzeilen sind mindestens einer AT-ID zugeordnet; jede AT-ID besitzt einen definierten Zielzustand und Gate-Ausgang.
+- Konsistenzpruefung: keine normativen offenen Markierungen, Platzhalter oder unbestimmten Formulierungen; AuditEvent-, Status-, Dispositions- und Reason-Code-Schreibweisen sind getrennt definiert.
+- Dateiscope: ausschliesslich `docs/architecture/cancellation-contract-decision-01.md` und, nach vollstaendigem Review-PASS, `PROJECT_STATE.md` geaendert; kein Anwendungscode, Testcode, Datenbankschema, keine Migration und keine Completion-ID-Aenderung.
+- Pflichtpruefung: `git diff --check` bestanden. Test, Typecheck, Lint und Build wurden nicht ausgefuehrt, weil der unveraenderliche Task ausschliesslich Dokumentation erlaubt.
+- Architect: `PASS - DEVELOPMENT_ONLY`; die bereits akzeptierte Semantik blieb unveraendert.
+- Security: `PASS - DEVELOPMENT_ONLY`; die bereits akzeptierte fail-closed Semantik blieb unveraendert.
+- Reviewer: `PASS`; AC8, AT-09, AT-15, AT-16, AT-17, AT-19, AT-20 und die Traceability-Matrix sind formal vollstaendig.
+- Legal-Review: gemaess Owner-Auftrag nicht ausgefuehrt.
+- Freigabe: `APPROVED - DEVELOPMENT ONLY`. Diese Vertragsfreigabe ist keine Implementierungs-, Release-Candidate- oder Produktionsfreigabe. Production deployment bleibt `DISABLED`.
