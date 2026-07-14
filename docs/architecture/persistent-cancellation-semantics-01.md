@@ -68,3 +68,7 @@ Positive Review-Evidenz: Row Lock, Owner/Claim/Fence-Guards, autoritative Lease-
 Die nicht erfuellten Akzeptanzkriterien sind AC1, AC2, AC3, AC5 und AC8. Reproduzierbare Evidenz und betroffener Scope sind oben dokumentiert. Repair ordinal `1/1` ist verbraucht; ein weiterer automatischer Reparatur- oder Reviewdurchlauf ist verboten. Der Owner muss den Task `BLOCKED` belassen oder einen neuen eng begrenzten Task mit neuem unveraenderlichem Arbeitsvertrag und neuer Writer-Identitaet autorisieren, der verifizierbare Cancellation-Evidenz, terminale Snapshot-Verwertung im realen Late-Cancel-Pfad und Recovery am letzten budgetierten Cancel-Versuch behebt und gezielt testet.
 
 Die Completion-ID bleibt als separater Blocker ebenfalls offen. Der Gesamtprojektzustand bleibt `BLOCKED - DEVELOPMENT ONLY`. Es gibt keine Release-Candidate- oder Produktionsfreigabe; Production deployment bleibt `DISABLED`.
+
+## Owner architecture decision follow-up
+
+The documentation-only task `CANCELLATION-CONTRACT-DECISION-01` defines the normative contract needed before any new implementation task may address the blocked findings above. Its shared row-lock/CAS commit ordering, structured verified `RuntimeTerminationEvidence`, late-result disposition, final recovery reconciliation, and `CANCEL_STUCK` rules supersede ambiguous confirmation-string and runtime-snapshot interpretations. This reference does not repair or reopen this exhausted task.

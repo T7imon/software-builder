@@ -315,6 +315,8 @@ Constraints:
 
 Fields: `id`, `project_id`, `workflow_execution_id`, `attempt_id`, `requested_by`, `reason`, `state`, `requested_at`, `acknowledged_at`, `termination_evidence_id`.
 
+The normative extension for Completion/Cancellation ordering and `RuntimeTerminationEvidence` is `docs/architecture/cancellation-contract-decision-01.md`. `CancellationRequest.state` must distinguish at least accepted cancellation from `REJECTED_TOO_LATE`. `termination_evidence_id` may authorize `CANCELLED` only when it references an immutable verifier decision with `validity=VALID` bound to the exact project, runtime, agent run, attempt, job, workload/process identity, cancellation sequence, lease generation, and fencing token. A caller-supplied confirmation kind or terminal status string is not evidence. Runtime observation and authoritative result disposition are separate so that an observed late `SUCCEEDED` can remain append-only while its result is `LATE_RESULT_DISCARDED`.
+
 ## 7. Quality and Review
 
 ### `ToolchainManifest`
