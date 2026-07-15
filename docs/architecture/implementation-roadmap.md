@@ -1,8 +1,8 @@
 # Builder Platform V1 Implementation Roadmap
 
-Status: `FOUNDATION AUTHORIZED - APPLICATION CODE OUT OF SCOPE FOR THIS REVIEW`
+Status: `WORKER_FAKE_RUNTIME_MVP - BLOCKED - DEVELOPMENT ONLY`
 
-This roadmap sequences future work. `PROJECT_STATE.md` records architecture and implementation authorization for the single active `FOUNDATION` milestone. This review changes documentation only and authorizes no application-code change. GitHub, automatic project execution, and production remain disabled.
+This roadmap sequences future work. `PROJECT_STATE.md` records the active local `WORKER_FAKE_RUNTIME_MVP` milestone. This scope-reset review changes documentation only and authorizes no application-code change. GitHub, automatic project execution, and production remain disabled.
 
 ## 1. Current Position
 
@@ -16,7 +16,9 @@ This roadmap sequences future work. `PROJECT_STATE.md` records architecture and 
 - The instruction to fix all named planning problems supersedes the earlier no-login choice. D-020 now uses Windows Hello plus a second independent FIDO2 authenticator.
 - Hardware, provider-contract, conformance, restore, and operational tests remain fail-closed activation evidence. They are not unresolved architecture choices.
 - M-000 planning content: complete and owner-approved.
-- M-001 `FOUNDATION`: the sole active authorized milestone. Later milestones are not authorized.
+- The historical foundation and local persistence work provide the base for the active `WORKER_FAKE_RUNTIME_MVP` component milestone.
+- `WORKER_FAKE_RUNTIME_MVP` is the sole active milestone and is limited to synthetic data, `FakeAgentRuntime`, and one local worker by default.
+- `REAL_RUNTIME_HARDENING` is required, unresolved, and fail closed before real Codex execution, agent-driven GitHub changes, Release Candidate, or Production.
 
 ## 2. Milestone Rules
 
@@ -159,7 +161,7 @@ Requirements: FR-006, FR-007, FR-025, FR-029; NFR-001, NFR-004, NFR-019; SEC-B-0
 
 ### M-005 Dedicated GitHub Integration
 
-Dependencies: M-004 and explicit `GitHub integration enabled: YES` only after milestone prerequisites.
+Dependencies: M-004 and explicit `GitHub integration enabled: YES` only after milestone prerequisites. Agent-driven or automatic GitHub changes additionally require completed `REAL_RUNTIME_HARDENING`; private GitHub infrastructure planning alone does not enable agent writes.
 
 Scope:
 
@@ -183,7 +185,7 @@ Requirements: FR-008, FR-025, FR-026, FR-029, FR-031; SEC-B-003; LGL-B03, LGL-B0
 
 ### M-006 Single-Task Codex Execution
 
-Dependencies: M-005 unless D-010 approves a different lifecycle; explicit `Automatic project execution: YES` only after readiness.
+Dependencies: M-005 unless D-010 approves a different lifecycle, completed `REAL_RUNTIME_HARDENING`, and a separately approved `AGENT_RUNTIME=codex` gate; explicit `Automatic project execution: YES` only after all technical, Security, Legal, provider, and owner readiness gates pass.
 
 Scope:
 
@@ -204,6 +206,52 @@ Exit criteria:
 - exact provider product, DPA, transfer, retention, region, and AI role evidence is current.
 
 Requirements: FR-009..012, FR-024, FR-025, FR-029, FR-031; SEC-B-001, B002; LGL-B03, B07; D-008, D-013, D-022, D-029.
+
+### WORKER_FAKE_RUNTIME_MVP - Local Worker and Fake Pipelines
+
+Dependencies: approved architecture, persistent local job storage, and explicit `Implementation enabled: YES` for separately contracted development tasks.
+
+Scope:
+
+- local `AgentRuntime` port and deterministic `FakeAgentRuntime` for success, error, timeout, and confirmed cancellation;
+- persistent job claim, lease, generation, fencing, retry limit, and restart recovery;
+- atomic pre-start cancellation based on provable persistent job/outbox state;
+- fail-closed `CANCEL_STUCK` or blocked gate for every unclear cancellation/runtime outcome;
+- synthetic data and one local worker by default;
+- local Agent Registry and Fake-Pipeline development may follow through separate tasks.
+
+Exit criteria:
+
+- all eleven criteria in `worker-fake-runtime-mvp-scope-reset-01.md` pass on the current stable stand;
+- all current tests, PostgreSQL integration without skips, lint, typecheck, build, and `git diff --check` pass;
+- QA, Reviewer, Security, and Legal DE complete their scoped read-only reviews on the same fixed stand;
+- GitHub remains `NO`, automatic project execution remains `NO`, and Production deployment remains `DISABLED`.
+
+This milestone is only `DEVELOPMENT_ONLY`. It neither satisfies nor waives any Real-Runtime, Release-Candidate, or Production gate.
+
+### REAL_RUNTIME_HARDENING - Mandatory Real Runtime Gate
+
+Dependencies: completed local Fake-Pipeline/Registry development and a separately authorized immutable task contract.
+
+Required unresolved scope:
+
+- real `RuntimeTerminationEvidence` and cryptographic or provider-bound termination attestation;
+- complete `WORKLOAD_NOT_CREATED` attestation from a real external runtime;
+- distributed, multiprocess-capable final reconciliation;
+- actual runtime-status query against Codex;
+- crash handling between external runtime query and Evidence commit;
+- complete AT-15/16/17/19/22 Production evidence;
+- Completion-ID hardening;
+- real worker and process identity;
+- provider and credential revocation.
+
+Exit criteria:
+
+- every listed item is evidenced and approved at its assigned gate; no item is inferred from FakeRuntime results;
+- the approved `CANCELLATION-CONTRACT-DECISION-01` target architecture is fully implemented for the real runtime;
+- Security, Legal, provider, GitHub, release, and explicit owner gates independently pass where applicable.
+
+Status: `REQUIRED - DEFERRED_TO_LATER_GATE - FAIL CLOSED`. Completion is mandatory before `AGENT_RUNTIME=codex`, writing real Codex executors, automatic GitHub changes, `RELEASE_CANDIDATE`, or `PRODUCTION`, but is not alone sufficient to activate any of them.
 
 ### M-007 Quality, Four Reviews, and Repair Limit
 
@@ -371,14 +419,15 @@ None of these records is a Security or Legal successor review, an architecture a
 
 ## 8. Remaining Gate Order
 
-1. Implement only the single active `FOUNDATION` milestone and only through a separately authorized implementation workflow; this documentation review implements no code.
-2. Provider-specific OpenAI, GitHub, backup, timestamp, and Object-Lock evidence is required before those separate external-processing gates can become `YES`; a failed or missing check leaves only that capability disabled.
-3. Hardware, VM, SDK, restore, authorization, authentication, and hostile-child conformance tests are milestone acceptance evidence and fail closed without reopening the selected architecture unless an adapter proves infeasible.
-4. GitHub, automatic execution, external publication, and production remain disabled until their own explicit gates and prerequisites pass.
+1. Continue only local Agent Registry and Fake-Pipeline work through separately contracted `DEVELOPMENT_ONLY` tasks after `WORKER_FAKE_RUNTIME_MVP` passes; this documentation review implements no code.
+2. Complete `REAL_RUNTIME_HARDENING` before any real Runtime/Codex activation or agent-driven GitHub change. Its deferred items remain unresolved and fail closed.
+3. Provider-specific OpenAI, GitHub, backup, timestamp, and Object-Lock evidence is required before those separate external-processing gates can become `YES`; a failed or missing check leaves that capability disabled.
+4. Hardware, VM, SDK, restore, authorization, authentication, and hostile-child conformance tests remain milestone acceptance evidence and fail closed without reopening the selected architecture unless an adapter proves infeasible.
+5. GitHub, automatic execution, external publication, Release Candidate, and production remain disabled until all of their own explicit technical, Security, Legal, provider, and owner gates pass.
 
 ## 9. Architecture Approval Checklist
 
-- [x] Owner recorded `Architecture approved: YES` and `Implementation enabled: YES`; `FOUNDATION` is the sole active milestone.
+- [x] Owner recorded `Architecture approved: YES` and `Implementation enabled: YES`; `WORKER_FAKE_RUNTIME_MVP` is the sole active local development milestone.
 - [x] All D-001..D-032 have a documented MVP treatment, reason, disadvantage, and migration path.
 - [x] D-020 specifies phishing-resistant WebAuthn, two authenticators, short sessions, CSRF controls, and fresh high-risk reauthentication.
 - [x] QEMU/WHPX, DPAPI/PIV recovery, exact audit-anchor, and exact project-authorization designs are documented; their conformance tests remain milestone gates.
@@ -386,5 +435,5 @@ None of these records is a Security or Legal successor review, an architecture a
 - [x] Security successor verdict is `ACCEPTED_WITH_IMPLEMENTATION_GATES`.
 - [x] Legal successor verdict is `PASS_WITH_REQUIREMENTS`; M-000 is accepted and later evidence gates are assigned.
 - [x] The eight documents pass cross-reference and terminology checks.
-- [x] `PROJECT_STATE.md` records `FOUNDATION`; GitHub and automatic execution remain `NO`, production remains `DISABLED`.
+- [x] `PROJECT_STATE.md` records `WORKER_FAKE_RUNTIME_MVP`; GitHub and automatic execution remain `NO`, production remains `DISABLED`.
 - [x] This review changes documentation only and does not implement application code.

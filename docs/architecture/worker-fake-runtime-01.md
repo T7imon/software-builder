@@ -64,3 +64,13 @@ Finale Read-only-Entscheidungen auf demselben Stand: QA `BLOCK`, Reviewer `BLOCK
 Der Erfolgssatz `WORKER UND FAKE RUNTIME BESTANDEN  DEVELOPMENT ONLY` ist nicht zulaessig. Der Owner muss entweder diesen Task als `BLOCKED` belassen oder einen neuen, eng begrenzten Task mit neuem unveraenderlichem Arbeitsvertrag und neuer festgelegter Writer-Identitaet fuer Cancel-Linearisation, kollisionsfeste Completion-IDs und die deterministische Stabilisierung des Lease-Loss-Gates autorisieren. Danach muessen alle Pflichtpruefungen und die vier Read-only-Reviews auf einem neuen fixierten Digest erneut ausgefuehrt werden.
 
 Production deployment bleibt `DISABLED`; diese Komponentenpruefung ist keine Release-Candidate- oder Produktionsfreigabe.
+
+## Scope-Reset-Nachfolger `WORKER-FAKE-RUNTIME-MVP-SCOPE-RESET-01`
+
+Owner-Entscheidung vom 2026-07-15: Der vorstehende historische Abschluss und seine damalige Bewertung gegen weitergehende Cancellation-/Produktionsmassstaebe bleiben unveraendert erhalten. Sie werden weder geloescht noch rueckwirkend als bestanden bezeichnet. Der neue, getrennte Dokumentations- und Freigabetask `WORKER-FAKE-RUNTIME-MVP-SCOPE-RESET-01` bewertet den aktuellen stabilen Stand ausschliesslich gegen den lokalen `DEVELOPMENT_ONLY`-Meilenstein `WORKER_FAKE_RUNTIME_MVP`.
+
+Fuer diesen MVP bleiben der aktuelle vollstaendige Testlauf, der persistente atomare Pre-start-Cancel, fail-closed Cancellation, Retry/Restart sowie Lease-/Generation-/Fencing-Schutz bindende Gates. Der damalige flakige Lease-Loss-Test kann nur durch einen frischen vollstaendig gruenen Pflichtlauf geschlossen werden; er wird nicht aufgrund dieser Dokumentation als bestanden angenommen.
+
+Reale RuntimeTerminationEvidence, kryptografische oder providergebundene Attestation, echte externe `WORKLOAD_NOT_CREATED`-Attestation, verteilte finale Reconciliation, Codex-Statusabfrage, der Crash zwischen externer Abfrage und Evidence-Commit, vollstaendige AT-15/16/17/19/22-Production-Evidenz, Completion-ID-Hardening, reale Worker-/Prozessidentitaet und Provider-/Credential-Widerruf bleiben offen. Sie sind zwingend und fail-closed dem spaeteren Meilenstein `REAL_RUNTIME_HARDENING` zugeordnet.
+
+Der genehmigte Cancellation-Vertrag bleibt als Zielarchitektur in Kraft. Der Scope-Reset hebt ihn nicht auf, erlaubt keine echte Runtime und erzeugt keine Release-Candidate- oder Produktionsfreigabe. Massgeblich fuer den neuen Task sind Vertrag, Pruefnachweise, Reviews und Abschluss in `docs/architecture/worker-fake-runtime-mvp-scope-reset-01.md`.
