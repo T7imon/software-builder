@@ -80,6 +80,19 @@ describe("Persistence-Schema",()=>{
     expect(sql).toContain("terminal implementation run is immutable");
     expect(sql).toContain("implementation start requires the exact persistent owner-approved planning revision");
   });
+  it("persistiert isolierte lokale Project-Workspaces mit Approval-, Status- und RLS-Grenzen",()=>{
+    expect(sql).toContain("CREATE TABLE builder.project_workspaces");
+    expect(sql).toContain("project_workspaces_project_revision_unique");
+    expect(sql).toContain("project_workspaces_relative_path_unique");
+    expect(sql).toContain("project_workspaces_one_ready_revision");
+    expect(sql).toContain("project workspace path and branch must equal the deterministic Builder derivation");
+    expect(sql).toContain("project workspace requires the exact persistent owner-approved planning revision");
+    expect(sql).toContain("project workspace identity and binding are immutable");
+    expect(sql).toContain("ARCHIVED project workspace is terminal");
+    expect(sql).toContain("ALTER TABLE builder.project_workspaces FORCE ROW LEVEL SECURITY");
+    expect(sql).toContain("GRANT UPDATE(status,failure_code) ON builder.project_workspaces TO builder_runtime");
+    expect(sql).not.toMatch(/project_workspaces[\s\S]{0,500}remote_url|project_workspaces[\s\S]{0,500}absolute_path/i);
+  });
   it("validiert opaque Capabilities, Ablauf und Signatur",async()=>{
     let now=new Date("2026-01-01T00:00:00Z"); const authority=new HmacCapabilityAuthority(new Uint8Array(32).fill(7),()=>now); const id="00000000-0000-4000-8000-000000000001" as ProjectId;
     const capability=authority.issueProject(id,{subject:"test-actor",actorScope:"TEST",allowedRoles:["TEST"],allowedOperations:["task:read"]},1000); expect((await authority.verifyProject(capability,{audience:"persistence",operation:"task:read"})).projectId).toBe(id);
