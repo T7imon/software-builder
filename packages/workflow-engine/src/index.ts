@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
+export * from "./planning-orchestrator.js";
+
 export const PROJECT_PHASES = deepFreeze([
   "DRAFT", "DISCOVERY", "SPECIFICATION", "ARCHITECTURE", "PRE_BUILD_REVIEW",
   "AWAITING_PLAN_APPROVAL", "IMPLEMENTATION", "VERIFICATION", "BLOCKED",

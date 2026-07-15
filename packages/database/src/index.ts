@@ -5,6 +5,7 @@ import type { ProjectWorkflow, WorkflowPersistenceProjection } from "@software-b
 import type { BootstrapCapability, BootstrapCapabilityVerifier, BuilderProject, CommandEnvelope, CommandResult, CreateProjectInput, EntityMutation, ProjectCapability, ProjectCapabilityVerifier, ProjectContextIssuer, TaskRecord, VerifiedProjectCapability } from "./types.js";
 import { PostgresAgentAssignmentRepository } from "./agent-assignment.js";
 import { PostgresAgentRegistryRepository } from "./agent-registry.js";
+import { PostgresPlanningOrchestratorRepository } from "./planning-orchestrator-repository.js";
 
 export interface WorkflowLeaseGuard {
   readonly jobId: string;
@@ -21,6 +22,7 @@ export * from "./workflow-repository.js";
 export * from "./agent-job-repository.js";
 export * from "./agent-assignment.js";
 export * from "./agent-registry.js";
+export * from "./planning-orchestrator-repository.js";
 
 interface ProjectRow { id: string; project_type: "FULL_STACK_WEB"; status: BuilderProject["status"]; version: number; created_at: Date; updated_at: Date; }
 interface TaskRow { id: string; project_id: string; milestone_id: string; task_type: string; statement_ref: string; acceptance_criteria_ref: string; status: TaskRecord["status"]; repair_count: number; version: number; created_at: Date; updated_at: Date; }
@@ -167,6 +169,17 @@ export class PostgresDatabase {
       await pool.end(); throw new Error("DATABASE_URL ist keine isolierte Builder-Runtime-Identitaet.");
     }
     return new PostgresDatabase(pool,contextIssuer, capabilityVerifier, bootstrapVerifier);
+  }
+
+  async createPlanningOrchestrator(capability:ProjectCapability):Promise<PostgresPlanningOrchestratorRepository>{
+    const binding=await this.claim(capability,"planning:read");
+    return PostgresPlanningOrchestratorRepository.forProject(async(request,action)=>{
+      const verified=await this.claim(capability,request.operation);
+      if(verified.capabilityId!==binding.capabilityId||verified.projectId!==binding.projectId||verified.subject!==binding.subject)throw new Error("PLANNING_CAPABILITY_BINDING_CHANGED");
+      if(request.projectId.toLowerCase()!==verified.projectId.toLowerCase())throw new Error("PLANNING_CAPABILITY_PROJECT_MISMATCH");
+      if(request.actor!==undefined&&request.actor!==verified.subject)throw new Error("PLANNING_CAPABILITY_ACTOR_MISMATCH");
+      return this.transaction(verified,session=>action({projectId:session.projectId,subject:verified.subject,query:(sql,values=[])=>session.query(sql,values)}));
+    });
   }
 
   async verifyBootstrap(capability: BootstrapCapability,subject:string,actorScope:string): Promise<void> { await this.bootstrapVerifier.verifyBootstrap(capability,subject,actorScope); }
