@@ -6,6 +6,7 @@ import type { BootstrapCapability, BootstrapCapabilityVerifier, BuilderProject, 
 import { PostgresAgentAssignmentRepository } from "./agent-assignment.js";
 import { PostgresAgentRegistryRepository } from "./agent-registry.js";
 import { PostgresPlanningOrchestratorRepository } from "./planning-orchestrator-repository.js";
+import { PostgresWorkspaceRegistrationStore, type WorkspaceRepositoryLock, type WorkspaceRepositoryQuery, type WorkspaceRepositoryTransaction } from "./workspace-repository.js";
 
 export interface WorkflowLeaseGuard {
   readonly jobId: string;
@@ -23,6 +24,7 @@ export * from "./agent-job-repository.js";
 export * from "./agent-assignment.js";
 export * from "./agent-registry.js";
 export * from "./planning-orchestrator-repository.js";
+export * from "./workspace-repository.js";
 
 interface ProjectRow { id: string; project_type: "FULL_STACK_WEB"; status: BuilderProject["status"]; version: number; created_at: Date; updated_at: Date; }
 interface TaskRow { id: string; project_id: string; milestone_id: string; task_type: string; statement_ref: string; acceptance_criteria_ref: string; status: TaskRecord["status"]; repair_count: number; version: number; created_at: Date; updated_at: Date; }
@@ -180,6 +182,43 @@ export class PostgresDatabase {
       if(request.actor!==undefined&&request.actor!==verified.subject)throw new Error("PLANNING_CAPABILITY_ACTOR_MISMATCH");
       return this.transaction(verified,session=>action({projectId:session.projectId,subject:verified.subject,query:(sql,values=[])=>session.query(sql,values)}));
     });
+  }
+
+  async createWorkspaceRegistrationStore(capability:ProjectCapability):Promise<PostgresWorkspaceRegistrationStore>{
+    const binding=await this.claim(capability,"workspace:read");
+    const verifyBinding=async(operation:"workspace:read"|"workspace:append")=>{
+      const verified=await this.claim(capability,operation);
+      if(verified.capabilityId!==binding.capabilityId||verified.projectId!==binding.projectId||verified.subject!==binding.subject)throw new Error("WORKSPACE_CAPABILITY_BINDING_CHANGED");
+      return verified;
+    };
+    const transaction:WorkspaceRepositoryTransaction=async(operation,action)=>{
+      const verified=await verifyBinding(operation);
+      return this.transaction(verified,session=>action({query:(sql,values=[])=>session.query(sql,values)}));
+    };
+    const lock:WorkspaceRepositoryLock=async(lockName,action)=>{
+      await verifyBinding("workspace:append");
+      const client=await this.pool.connect();
+      try{
+        await client.query("SELECT pg_advisory_lock(hashtextextended($1,0))",[lockName]);
+        const lockedTransaction:WorkspaceRepositoryTransaction=async(operation,transactionAction)=>{
+          const verified=await verifyBinding(operation);
+          const contextGrant=await this.contextIssuer.issueContext(verified);
+          await client.query("BEGIN");
+          try{
+            await client.query("SELECT builder.consume_project_context($1)",[contextGrant]);
+            const query:WorkspaceRepositoryQuery={query:(sql,values=[])=>client.query(sql,[...values])};
+            const result=await transactionAction(query);
+            await client.query("COMMIT");
+            return result;
+          }catch(error){await client.query("ROLLBACK");throw error;}
+        };
+        return await action(lockedTransaction);
+      }finally{
+        await client.query("SELECT pg_advisory_unlock(hashtextextended($1,0))",[lockName]).catch(()=>undefined);
+        client.release();
+      }
+    };
+    return new PostgresWorkspaceRegistrationStore(binding.projectId,binding.subject,transaction,lock);
   }
 
   async verifyBootstrap(capability: BootstrapCapability,subject:string,actorScope:string): Promise<void> { await this.bootstrapVerifier.verifyBootstrap(capability,subject,actorScope); }

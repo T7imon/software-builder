@@ -1,4 +1,4 @@
-Current milestone: ORCHESTRATOR_IMPLEMENTATION_MVP
+Current milestone: PROJECT_WORKSPACE_MVP
 Architecture approved: YES
 Implementation enabled: YES
 GitHub integration enabled: NO
@@ -28,5 +28,15 @@ Implementation Orchestrator evidence: Unit 5/5, PostgreSQL/Capability/RLS 16/16 
 Implementation Orchestrator repair budget: 1/1 consumed for UUID replay canonicalization; final scope findings: NONE
 Implementation run target: READY_FOR_DELIVERY requires one immutable successful synthetic Executor result and four terminal reviews bound to that same result; deterministic priority is BLOCKED before CHANGES_REQUESTED before READY_FOR_DELIVERY
 Implementation data profile: synthetic DEVELOPMENT_ONLY artifacts, digests and minimized requirement references; no target-project writes, Codex/OpenAI process, Git/GitHub action, customer data, counsel approval or production claim
-Implementation deferred gates: REAL_RUNTIME_HARDENING, Completion-ID-Hardening, real worker/process identity, provider and credential controls, workspace, GitHub, release candidate and production remain fail-closed
+Implementation deferred gates: REAL_RUNTIME_HARDENING, Completion-ID-Hardening, real worker/process identity, provider and credential controls, real-runtime workspace hardening, GitHub, release candidate and production remain fail-closed
 Implementation Orchestrator exact status: ORCHESTRATOR IMPLEMENTATION MVP BESTANDEN  DEVELOPMENT ONLY
+Project Workspace: PROJECT-WORKSPACE-MVP-01 - PASSED - DEVELOPMENT ONLY
+Project Workspace structure: BUILDER_WORKSPACE_ROOT/<canonical-project-uuid>/revision-<full-sha256> with bound minimal metadata and an isolated local non-bare Git repository
+Project Workspace persistence: PostgreSQL migration 015; one immutable registration per project/revision; CREATING, READY, FAILED and terminal ARCHIVED; project RLS and exact owner-approved planning revision required
+Project Workspace safety: fail-closed absolute/traversal/drive/UNC/reserved-path validation, path.relative containment, realpath/lstat Symlink/Junction checks, no foreign-folder adoption, fixed execFile Git boundary without hooks, remotes or network
+Project Workspace concurrency and recovery: PostgreSQL session advisory lock linearizes Create, Reconcile and Archive across managers; restart, CREATING/FAILED recovery and READY re-verification passed without duplicates or READY partial state
+Project Workspace evidence: Workspace Unit 26/26, filesystem 3/3, PostgreSQL/schema 16/16 without skips, local Git 3/3, Planning 20/20, Implementation 21/21, Registry/Assignment 33/33, Worker/Fake Runtime 54/54, serial Root suite 327/327, Lint, Typecheck, Build and git diff --check passed
+Project Workspace reviews: QA PASS; Reviewer PASS; Security PASS - DEVELOPMENT_ONLY; Legal NOT_APPLICABLE; final current-scope findings NONE
+Project Workspace repair budget: 0/1 consumed; application freeze verified across 20 allowed files
+Project Workspace deferred gates: real Codex adapter, REAL_RUNTIME_HARDENING, hostile-local-process atomic no-follow/ACL or fenced mount isolation, pinned Git toolchain provenance, GitHub, release candidate, deployment and production remain fail-closed
+Project Workspace exact status: PROJECT WORKSPACE MVP BESTANDEN  DEVELOPMENT ONLY
