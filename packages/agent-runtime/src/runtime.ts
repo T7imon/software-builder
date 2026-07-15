@@ -6,6 +6,8 @@ export interface RuntimeCommand { readonly runId: string; readonly projectId: st
 export type StartRunCommand = RuntimeCommand;
 export interface RuntimeStatus { readonly runId: string; readonly state: RuntimeState; readonly retryCount: number; readonly terminal: boolean; readonly result: AgentResult | null; readonly progress: readonly Progress[]; readonly terminationEvidence?:RuntimeTerminationEvidenceCandidate|null; }
 export interface AgentRuntime { startRun(command: StartRunCommand): Promise<RuntimeStatus>; continueRun(command: RuntimeCommand): Promise<RuntimeStatus>; cancelRun(command: RuntimeCommand): Promise<RuntimeStatus>; getRunStatus(command: RuntimeCommand): Promise<RuntimeStatus>; }
+export interface AbortableAgentRuntime { abortActiveRun(reason:"CANCELLED"|"LEASE_LOST"|"TIMEOUT"):void; }
+export interface ExternallyPersistedAgentRuntime { readonly externalPersistentStatus: true; }
 
 export interface RuntimeStoredRun { binding: Omit<RuntimeCommand, "idempotencyKey" | "requestDigest"|"task">; readonly startKey: string; readonly task: AgentTask; state: RuntimeState; retryCount: number; result: AgentResult | null; progress: Progress[]; commands: Map<string, { digest: string; fence: number; status: RuntimeStatus }>; }
 export interface RuntimeStore { load(runId: string): Promise<RuntimeStoredRun | undefined>; save(run: RuntimeStoredRun): Promise<void>; }

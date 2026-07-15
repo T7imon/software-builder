@@ -1,4 +1,4 @@
-import { FakeAgentRuntime, SchemaValidationError, type AgentResult, type AgentRuntime, type RuntimeStatus, type RuntimeStore } from "@software-builder/agent-runtime";
+import { FakeAgentRuntime, SchemaValidationError, type AbortableAgentRuntime, type AgentResult, type AgentRuntime, type ExternallyPersistedAgentRuntime, type RuntimeStatus, type RuntimeStore } from "@software-builder/agent-runtime";
 import { AgentJobCancellationRequestedError, AgentJobLeaseLostError, type AgentJobClaim, type AgentJobRepository } from "@software-builder/database";
 import { PostgresRuntimeStore } from "./postgres-runtime-store.js";
 
@@ -6,7 +6,7 @@ export interface JobProcessorOptions {
   readonly retryDelayMs?:number;
   readonly cancellationRetryDelayMs?:number;
   readonly cancellationTimeoutMs?:number;
-  readonly runtimeFactory?:(store:RuntimeStore)=>AgentRuntime;
+  readonly runtimeFactory?:(store:RuntimeStore,claim:AgentJobClaim)=>AgentRuntime|Promise<AgentRuntime>;
   readonly afterRuntimePersisted?:()=>void|Promise<void>;
   readonly beforeCompletionCommit?:(claim:AgentJobClaim,status:RuntimeStatus)=>void|Promise<void>;
 }
@@ -15,14 +15,16 @@ export class JobExecutionControl {
   private cancellation=false;
   private lost=false;
   private handler:(()=>Promise<void>)|undefined;
+  private leaseLossHandler:(()=>void)|undefined;
   private pending:Promise<void>|undefined;
   get cancellationRequested(){return this.cancellation;}
   get leaseLost(){return this.lost;}
   registerCancellationHandler(handler:()=>Promise<void>){this.handler=handler;this.invoke();}
+  registerLeaseLossHandler(handler:()=>void){this.leaseLossHandler=handler;if(this.lost)handler();}
   requestCancellation(){this.cancellation=true;this.invoke();}
-  loseLease(){this.lost=true;this.invoke();}
+  loseLease(){if(this.lost)return;this.lost=true;this.leaseLossHandler?.();}
   async settleCancellation(){await this.pending;}
-  private invoke(){if(this.handler&&(this.cancellation||this.lost)&&!this.pending)this.pending=this.handler();}
+  private invoke(){if(this.handler&&this.cancellation&&!this.pending)this.pending=this.handler();}
 }
 
 class RuntimeCancellationTimeoutError extends Error {
@@ -33,7 +35,7 @@ export class AgentJobProcessor {
   private readonly retryDelayMs:number;
   private readonly cancellationRetryDelayMs:number;
   private readonly cancellationTimeoutMs:number;
-  private readonly runtimeFactory:(store:RuntimeStore)=>AgentRuntime;
+  private readonly runtimeFactory:(store:RuntimeStore,claim:AgentJobClaim)=>AgentRuntime|Promise<AgentRuntime>;
   constructor(private readonly repository:AgentJobRepository,private readonly options:JobProcessorOptions={}){
     this.retryDelayMs=options.retryDelayMs??0;
     this.cancellationRetryDelayMs=options.cancellationRetryDelayMs??0;
@@ -43,8 +45,9 @@ export class AgentJobProcessor {
   }
 
   async process(claim:AgentJobClaim,control=new JobExecutionControl()):Promise<void>{
-    const store=new PostgresRuntimeStore(this.repository,claim);const runtime=this.runtimeFactory(store);
-    control.registerCancellationHandler(async()=>{if(control.leaseLost)return;const refreshed=await this.repository.loadClaim(store.guard());const cancellationStore=new PostgresRuntimeStore(this.repository,refreshed);await this.cancel(cancellationStore,this.runtimeFactory(cancellationStore));});
+    const store=new PostgresRuntimeStore(this.repository,claim);const runtime=await this.runtimeFactory(store,claim);
+    control.registerLeaseLossHandler(()=>{if(isAbortable(runtime))runtime.abortActiveRun("LEASE_LOST");});
+    control.registerCancellationHandler(async()=>{if(control.leaseLost)return;const refreshed=await this.repository.loadClaim(store.guard());const cancellationStore=new PostgresRuntimeStore(this.repository,refreshed);await this.cancel(cancellationStore,runtime);});
     if(claim.cancelRequested)control.requestCancellation();
     try{
       if(control.cancellationRequested){await control.settleCancellation();return;}
@@ -71,12 +74,13 @@ export class AgentJobProcessor {
   }
 
   private async cancel(store:PostgresRuntimeStore,runtime:AgentRuntime):Promise<void>{
-    let observed:RuntimeStatus|undefined;const persisted=await store.load(store.claim.task.runId);
-    if(persisted)observed=await runtime.getRunStatus(store.command("getRunStatus"));
+    let observed:RuntimeStatus|undefined;const persisted=await store.load(store.claim.task.runId);const externallyPersisted=isExternallyPersisted(runtime);
+    if(externallyPersisted&&isAbortable(runtime))runtime.abortActiveRun("CANCELLED");
+    if(persisted||externallyPersisted)observed=await runtime.getRunStatus(store.command("getRunStatus"));
     else if(store.claim.cancelAttemptCount>0)throw new Error("CANCELLATION_STATUS_QUERY_REQUIRED");
     if(observed?.terminal&&observed.result&&observed.result.status!=="CANCELLED")await this.repository.complete(store.guard(),observed.result,this.messageId(store.claim,`late-result:${this.watermark(observed)}`));
     if(observed?.terminationEvidence&&await this.confirmEvidence(store,observed))return;
-    if(persisted)await this.repository.recordCancellationReconciliation(store.guard(),this.watermark(observed),observed?.terminationEvidence?1:0,this.messageId(store.claim,`status-query:${store.claim.cancelAttemptCount}:${this.watermark(observed)}`));
+    if(persisted||externallyPersisted)await this.repository.recordCancellationReconciliation(store.guard(),this.watermark(observed),observed?.terminationEvidence?1:0,this.messageId(store.claim,`status-query:${store.claim.cancelAttemptCount}:${this.watermark(observed)}`));
     const started=await this.repository.beginCancellationAttempt(store.guard());if(!started.started){await this.repository.markCancellationStuck(store.guard(),this.watermark(observed));return;}
     let status:RuntimeStatus;try{
       status=await this.withCancellationTimeout(runtime.cancelRun(store.command("cancelRun")));
@@ -101,4 +105,6 @@ export class AgentJobProcessor {
   private cancelledResult(claim:AgentJobClaim):AgentResult{return{schemaVersion:1,projectId:claim.projectId,taskId:claim.task.taskId,attemptId:claim.task.attemptId,runId:claim.task.runId,status:"CANCELLED",findings:[],artifacts:[],decisions:[],errorCode:null};}
   private messageId(claim:AgentJobClaim,kind:string){const hex=stableHash(`${claim.jobId}:${kind}`);return `${hex.slice(0,8)}-${hex.slice(8,12)}-4${hex.slice(13,16)}-a${hex.slice(17,20)}-${hex.slice(20,32)}`;}
 }
+function isAbortable(runtime:AgentRuntime):runtime is AgentRuntime&AbortableAgentRuntime{return"abortActiveRun"in runtime&&typeof(runtime as Partial<AbortableAgentRuntime>).abortActiveRun==="function";}
+function isExternallyPersisted(runtime:AgentRuntime):runtime is AgentRuntime&ExternallyPersistedAgentRuntime{return"externalPersistentStatus"in runtime&&(runtime as Partial<ExternallyPersistedAgentRuntime>).externalPersistentStatus===true;}
 function stableHash(value:string):string{let hash=2166136261;for(const char of value){hash^=char.charCodeAt(0);hash=Math.imul(hash,16777619);}return(Math.abs(hash).toString(16).padStart(8,"0")).repeat(4).slice(0,32);}

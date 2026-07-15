@@ -13,6 +13,7 @@
     "lint": "eslint apps packages",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
+    "test:codex-smoke": "vitest run --config vitest.codex-smoke.config.ts",
     "db:migrate": "npm run build --workspace @software-builder/database && npm run db:migrate --workspace @software-builder/database",
     "db:reset": "npm run build --workspace @software-builder/database && npm run db:reset --workspace @software-builder/database",
     "db:seed": "npm run build --workspace @software-builder/database && npm run db:seed --workspace @software-builder/database",

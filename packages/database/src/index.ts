@@ -25,6 +25,8 @@ export * from "./agent-assignment.js";
 export * from "./agent-registry.js";
 export * from "./planning-orchestrator-repository.js";
 export * from "./workspace-repository.js";
+export * from "./codex-runtime-repository.js";
+export { migrate, resetDatabase } from "./migrations.js";
 
 interface ProjectRow { id: string; project_type: "FULL_STACK_WEB"; status: BuilderProject["status"]; version: number; created_at: Date; updated_at: Date; }
 interface TaskRow { id: string; project_id: string; milestone_id: string; task_type: string; statement_ref: string; acceptance_criteria_ref: string; status: TaskRecord["status"]; repair_count: number; version: number; created_at: Date; updated_at: Date; }

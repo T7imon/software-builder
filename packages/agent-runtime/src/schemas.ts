@@ -48,6 +48,7 @@ export interface Progress {
   readonly occurredAt: string;
 }
 export type AgentResultStatus = "SUCCESS" | "ERROR" | "TIMEOUT" | "CANCELLED" | "SECURITY_BLOCK" | "LEGAL_COUNSEL_REQUIRED";
+export type AgentResultErrorCode = "FAKE_ERROR" | "FAKE_TIMEOUT" | "CODEX_TIMEOUT" | "CODEX_SPAWN_FAILED" | "CODEX_PROCESS_FAILED" | "CODEX_JSONL_INVALID" | "CODEX_OUTPUT_INVALID" | "CODEX_OUTPUT_FAILED" | "CODEX_SECURITY_POLICY_VIOLATION" | "CODEX_RECOVERY_REQUIRED";
 export interface AgentResult {
   readonly schemaVersion: 1;
   readonly projectId: string;
@@ -58,7 +59,7 @@ export interface AgentResult {
   readonly findings: readonly Finding[];
   readonly artifacts: readonly Artifact[];
   readonly decisions: readonly Decision[];
-  readonly errorCode: "FAKE_ERROR" | "FAKE_TIMEOUT" | null;
+  readonly errorCode: AgentResultErrorCode | null;
 }
 
 export class SchemaValidationError extends Error {
@@ -97,14 +98,16 @@ export function parseArtifact(value: unknown): Artifact { strictObject(value, "A
 export function parseDecision(value: unknown): Decision { strictObject(value, "Decision", decisionShape); const item=value as unknown as Decision; if ((item.outcome === "BLOCK") !== (item.kind === "SECURITY") || (item.outcome === "COUNSEL_REQUIRED") !== (item.kind === "LEGAL")) throw new SchemaValidationError("Decision kind/outcome combination is invalid"); return item; }
 export function parseProgress(value: unknown): Progress { strictObject(value, "Progress", { schemaVersion: version, runId: ref, sequence: integer(1), phase: oneOf(["STARTED", "ANALYSING", "PRODUCING", "RETRYING", "CANCELLING", "FINISHED"]), occurredAt: (item) => typeof item === "string" && !Number.isNaN(Date.parse(item)) }); return value as unknown as Progress; }
 export function parseAgentResult(value: unknown): AgentResult {
-  strictObject(value, "AgentResult", { schemaVersion: version, projectId: ref, taskId: ref, attemptId: ref, runId: ref, status: oneOf(["SUCCESS", "ERROR", "TIMEOUT", "CANCELLED", "SECURITY_BLOCK", "LEGAL_COUNSEL_REQUIRED"]), findings: Array.isArray, artifacts: Array.isArray, decisions: Array.isArray, errorCode: nullable(oneOf(["FAKE_ERROR", "FAKE_TIMEOUT"])) });
+  strictObject(value, "AgentResult", { schemaVersion: version, projectId: ref, taskId: ref, attemptId: ref, runId: ref, status: oneOf(["SUCCESS", "ERROR", "TIMEOUT", "CANCELLED", "SECURITY_BLOCK", "LEGAL_COUNSEL_REQUIRED"]), findings: Array.isArray, artifacts: Array.isArray, decisions: Array.isArray, errorCode: nullable(oneOf(["FAKE_ERROR", "FAKE_TIMEOUT", "CODEX_TIMEOUT", "CODEX_SPAWN_FAILED", "CODEX_PROCESS_FAILED", "CODEX_JSONL_INVALID", "CODEX_OUTPUT_INVALID", "CODEX_OUTPUT_FAILED", "CODEX_SECURITY_POLICY_VIOLATION", "CODEX_RECOVERY_REQUIRED"])) });
   const result=value as unknown as AgentResult; result.findings.forEach(parseFinding); result.artifacts.forEach(parseArtifact); result.decisions.forEach(parseDecision);
   const stop = result.status === "SECURITY_BLOCK" ? "BLOCK" : result.status === "LEGAL_COUNSEL_REQUIRED" ? "COUNSEL_REQUIRED" : null;
   const securityFindings=result.findings.filter(item=>item.category==="SECURITY"||item.status==="BLOCK");
   const legalFindings=result.findings.filter(item=>item.category==="LEGAL"||item.status==="COUNSEL_REQUIRED");
   const securityDecisions=result.decisions.filter(item=>item.kind==="SECURITY"||item.outcome==="BLOCK");
   const legalDecisions=result.decisions.filter(item=>item.kind==="LEGAL"||item.outcome==="COUNSEL_REQUIRED");
-  if ((result.status === "ERROR") !== (result.errorCode === "FAKE_ERROR") || (result.status === "TIMEOUT") !== (result.errorCode === "FAKE_TIMEOUT")) throw new SchemaValidationError("AgentResult status/errorCode combination is invalid");
+  const errorCodes:readonly AgentResultErrorCode[]=["FAKE_ERROR","CODEX_SPAWN_FAILED","CODEX_PROCESS_FAILED","CODEX_JSONL_INVALID","CODEX_OUTPUT_INVALID","CODEX_OUTPUT_FAILED","CODEX_SECURITY_POLICY_VIOLATION","CODEX_RECOVERY_REQUIRED"];
+  const timeoutCodes:readonly AgentResultErrorCode[]=["FAKE_TIMEOUT","CODEX_TIMEOUT"];
+  if ((result.status === "ERROR") !== (result.errorCode!==null&&errorCodes.includes(result.errorCode)) || (result.status === "TIMEOUT") !== (result.errorCode!==null&&timeoutCodes.includes(result.errorCode)) || (result.status==="CANCELLED"&&result.errorCode!==null)) throw new SchemaValidationError("AgentResult status/errorCode combination is invalid");
   if (result.status === "SUCCESS" && result.artifacts.length === 0) throw new SchemaValidationError("Successful AgentResult needs an artifact");
   if(securityFindings.length>0&&legalFindings.length>0||securityDecisions.length>0&&legalDecisions.length>0)throw new SchemaValidationError("Mixed security/legal stop output is invalid");
   if (stop === "BLOCK" && (securityFindings.length===0||!securityDecisions.some(item=>item.outcome==="BLOCK")||legalFindings.length>0||legalDecisions.length>0)) throw new SchemaValidationError("Security stop needs matching security finding and decision only");

@@ -6,10 +6,15 @@ Automatic project execution: NO
 Production deployment: DISABLED
 Release level: DEVELOPMENT_ONLY
 Milestone status: BLOCKED - DEVELOPMENT ONLY
-Codex Runtime Adapter: CODEX-RUNTIME-ADAPTER-MVP-01 - BLOCKED - DEVELOPMENT ONLY
-Codex Runtime Adapter authorization: explicit owner-scoped read-only PLANNER exception; one synthetic real smoke turn; no write role, GitHub, automatic project execution, release candidate, deployment or production
-Codex Runtime Adapter blocker: @openai/codex-sdk 0.144.4 has no per-run all-MCP disable option; empty mcp_servers config does not clear inherited servers; C:\ProgramData\OpenAI\Codex\requirements.toml is absent; implementation and real smoke remain fail-closed
-Codex Runtime Adapter repair budget: 0/1 consumed; no application code, package, lockfile, migration or test changes; real smoke turns executed: 0
+Codex Runtime Adapter: CODEX-EXEC-RUNTIME-ADAPTER-MVP-02 - BLOCKED - DEVELOPMENT ONLY
+Codex Runtime Adapter predecessor: CODEX-RUNTIME-ADAPTER-MVP-01 remains historical BLOCKED; its SDK inheritance finding was accepted and the SDK-only restriction was superseded by the explicit MVP-02 owner decision
+Codex Runtime Adapter authorization: explicit owner-scoped codex exec read-only PLANNER exception in a verified synthetic persistent workspace; no write role, GitHub, automatic project execution, release candidate, deployment or production
+Codex Runtime Adapter implementation: pinned local @openai/codex 0.144.4; verified package bin via process.execPath/spawn shell=false; dedicated BUILDER_CODEX_HOME; ignore-user-config and ignore-rules; ephemeral JSONL; read-only sandbox; approval never; web and inherited integration surfaces disabled; strict structured output; persistent exactly-once and RECOVERY_REQUIRED ledger
+Codex Runtime Adapter evidence: targeted Runtime 29/29, Provider/JSONL 9/9, final Worker 42/42, Workspace 13/13, Registry/Assignment 9/9, Orchestrators 9/9, serial PostgreSQL 152/152 without skips, final serial Root 389/389, Lint, Typecheck, Build and git diff --check passed
+Codex Runtime Adapter blocker: the single opt-in smoke harness invocation failed before Codex process start with INVALID_CLAIM because codex-runtime.real-smoke.ts uses leaseMs 300000 while AgentJobRepository permits at most 120000; real Codex processes/turns executed: 0; no retry performed
+Codex Runtime Adapter repair budget: 1/1 consumed for running external-runtime cancellation abort ordering; re-review passed; another automatic code repair or smoke retry is forbidden and requires a new owner task contract
+Codex Runtime Adapter reviews: QA BLOCKED; Reviewer BLOCK; Security static implementation PASS but DEVELOPMENT_ONLY BLOCK due missing real smoke evidence; Legal NOT_APPLICABLE
+Codex Runtime Adapter deferred gates: system Managed Policy or equivalent provider isolation, enforced MCP boundary, process-tree termination, real attestation/status, multiprocess reconciliation, Completion-ID hardening, real worker/process identity, credential revocation, provider/release/legal/owner gates remain fail-closed; Production deployment DISABLED
 Cancellation contract: CANCELLATION-CONTRACT-DECISION-01 - APPROVED - DEVELOPMENT ONLY (target architecture; local FakeRuntime pre-start cancellation implemented; no Real-Runtime authorization)
 Cancellation contract normative SHA-256: 58e44fe0a3638d25bdf34dc5aff8551872796486c343904923cb4f41150a4b9f
 Worker Fake Runtime MVP scope reset: WORKER-FAKE-RUNTIME-MVP-SCOPE-RESET-01 - PASSED_WITH_DEFERRED_HARDENING - DEVELOPMENT ONLY
