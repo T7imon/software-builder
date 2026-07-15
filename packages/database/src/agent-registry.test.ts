@@ -1,0 +1,21 @@
+import { describe,expect,it } from "vitest";
+import { AgentRegistryService,DEVELOPMENT_AGENT_SEEDS,type AgentDefinitionVersion,type AgentRegistryRepository,type CreateAgentDefinitionInput } from "./agent-registry.js";
+
+const capability="test" as never;
+const valid:CreateAgentDefinitionInput={agentKey:"planner",displayName:"Planner",role:"PLANNER",description:"Synthetic planner.",version:1,instructions:"Plan the scoped development task.",allowedCapabilities:["documentation.read"],forbiddenCapabilities:["production.deploy"],modelConfiguration:{model:"development-model",reasoningLevel:"MEDIUM",timeoutMs:1000,maxAttempts:2},createdBy:"synthetic-test"};
+const version:AgentDefinitionVersion={id:"00000000-0000-4000-8000-000000000011",agentId:"00000000-0000-4000-8000-000000000012",...valid,revision:1,status:"DRAFT",createdAt:new Date("2026-01-01T00:00:00Z")};
+class StubRepository implements AgentRegistryRepository {
+  calls=0;versionCalls=0;
+  createDefinition=async()=>{this.calls++;return version;}; createVersion=async()=>{this.versionCalls++;return version;};
+  getVersion=async()=>version;getActive=async()=>version;list=async()=>[version];activate=async()=>version;retireActive=async()=>({...version,status:"RETIRED" as const});
+}
+
+describe("AgentRegistryService",()=>{
+  it("stellt alle acht synthetischen Development-Seeds ohne produktive Freigaben bereit",()=>{expect(DEVELOPMENT_AGENT_SEEDS.map(seed=>seed.role)).toEqual(["ORCHESTRATOR","PLANNER","ARCHITECT","EXECUTOR","QA","REVIEWER","SECURITY","LEGAL_DE_EU"]);expect(new Set(DEVELOPMENT_AGENT_SEEDS.map(seed=>seed.agentKey)).size).toBe(8);for(const seed of DEVELOPMENT_AGENT_SEEDS){expect(JSON.stringify(seed)).not.toMatch(/api.?key|access.?token|password|customer/i);expect(seed.forbiddenCapabilities).toContain("production.deploy");}});
+  it("akzeptiert eine gueltige Definition",async()=>{const repository=new StubRepository();const service=new AgentRegistryService(repository);await expect(service.createDefinition(capability,valid)).resolves.toEqual(version);expect(repository.calls).toBe(1);});
+  it("erzwingt Version 1 fuer neue Definitionen und validiert optionale Versions-agentIds",async()=>{const repository=new StubRepository();const service=new AgentRegistryService(repository);expect(()=>service.createDefinition(capability,{...valid,version:2})).toThrow(/Version 1/);expect(repository.calls).toBe(0);expect(()=>service.createVersion(capability,{...valid,version:2,agentId:"not-a-uuid"})).toThrow(/agentId/);await expect(service.createVersion(capability,{...valid,version:2,agentId:version.agentId})).resolves.toEqual(version);expect(repository.versionCalls).toBe(1);});
+  it("weist unbekannte Rollen und Status fail-closed ab",()=>{const service=new AgentRegistryService(new StubRepository());expect(()=>service.createDefinition(capability,{...valid,role:"UNKNOWN" as never})).toThrow(/rolle/i);expect(()=>service.list(capability,{status:"UNKNOWN" as never})).toThrow(/status/i);});
+  it("weist leere Instructions und ungueltige Modellwerte ab",()=>{const service=new AgentRegistryService(new StubRepository());expect(()=>service.createDefinition(capability,{...valid,instructions:" "})).toThrow(/instructions/i);expect(()=>service.createDefinition(capability,{...valid,modelConfiguration:{timeoutMs:99}})).toThrow(/timeoutMs/);expect(()=>service.createDefinition(capability,{...valid,modelConfiguration:{model:"x",apiKey:"placeholder"} as never})).toThrow(/nicht erlaubt/);});
+  it("weist Secret-Feldnamen und Secret-Material fail-closed ab",()=>{const service=new AgentRegistryService(new StubRepository());expect(()=>service.createDefinition(capability,{...valid,instructions:"api_key=not-allowed"})).toThrow(/Secret/);expect(()=>service.createDefinition(capability,{...valid,modelConfiguration:{model:"Bearer abcdefghijklmnop"}})).toThrow(/Secret/);});
+  it("weist doppelte und widerspruechliche Capabilities ab",()=>{const service=new AgentRegistryService(new StubRepository());expect(()=>service.createDefinition(capability,{...valid,allowedCapabilities:["documentation.read","documentation.read"]})).toThrow(/Capabilities/);expect(()=>service.createDefinition(capability,{...valid,allowedCapabilities:["same"],forbiddenCapabilities:["same"]})).toThrow(/zugleich/);});
+});
