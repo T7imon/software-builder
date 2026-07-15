@@ -1,4 +1,4 @@
-Current milestone: ORCHESTRATOR_PLANNING_MVP
+Current milestone: ORCHESTRATOR_IMPLEMENTATION_MVP
 Architecture approved: YES
 Implementation enabled: YES
 GitHub integration enabled: NO
@@ -22,3 +22,11 @@ Planning Orchestrator repair budget: 1/1 consumed; final scope findings: NONE
 Planning run target: READY_FOR_IMPLEMENTATION requires immutable Owner APPROVE after successful ARCHITECT, SECURITY and LEGAL_DE_EU results; no EXECUTOR job is created
 Planning data profile: synthetic DEVELOPMENT_ONLY results and minimized requirement references; LEGAL_DE_EU is not legal advice or counsel approval
 Planning Orchestrator exact status: ORCHESTRATOR PLANNING MVP BESTANDEN  DEVELOPMENT ONLY
+Implementation Orchestrator: ORCHESTRATOR-IMPLEMENTATION-MVP-02 - PASSED - DEVELOPMENT ONLY
+Implementation Orchestrator flow: READY_FOR_IMPLEMENTATION + Owner APPROVE -> IMPLEMENTING / EXECUTOR -> IMPLEMENTATION_REVIEW / QA + REVIEWER + SECURITY + LEGAL_DE_EU -> READY_FOR_DELIVERY, CHANGES_REQUESTED oder BLOCKED
+Implementation Orchestrator evidence: Unit 5/5, PostgreSQL/Capability/RLS 16/16 without skips, Planning 20/20, Registry 19/19, Assignment 14/14, Workflow Engine 87/87, Worker/Fake Runtime 54/54, serial Root suite 289/289, Lint, Typecheck, Build, git diff --check, QA, Reviewer, Security and Legal-DE/EU passed
+Implementation Orchestrator repair budget: 1/1 consumed for UUID replay canonicalization; final scope findings: NONE
+Implementation run target: READY_FOR_DELIVERY requires one immutable successful synthetic Executor result and four terminal reviews bound to that same result; deterministic priority is BLOCKED before CHANGES_REQUESTED before READY_FOR_DELIVERY
+Implementation data profile: synthetic DEVELOPMENT_ONLY artifacts, digests and minimized requirement references; no target-project writes, Codex/OpenAI process, Git/GitHub action, customer data, counsel approval or production claim
+Implementation deferred gates: REAL_RUNTIME_HARDENING, Completion-ID-Hardening, real worker/process identity, provider and credential controls, workspace, GitHub, release candidate and production remain fail-closed
+Implementation Orchestrator exact status: ORCHESTRATOR IMPLEMENTATION MVP BESTANDEN  DEVELOPMENT ONLY
