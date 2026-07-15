@@ -1,11 +1,15 @@
-Current milestone: PROJECT_WORKSPACE_MVP
+Current milestone: CODEX_RUNTIME_ADAPTER_MVP
 Architecture approved: YES
 Implementation enabled: YES
 GitHub integration enabled: NO
 Automatic project execution: NO
 Production deployment: DISABLED
 Release level: DEVELOPMENT_ONLY
-Milestone status: PASSED - DEVELOPMENT ONLY
+Milestone status: BLOCKED - DEVELOPMENT ONLY
+Codex Runtime Adapter: CODEX-RUNTIME-ADAPTER-MVP-01 - BLOCKED - DEVELOPMENT ONLY
+Codex Runtime Adapter authorization: explicit owner-scoped read-only PLANNER exception; one synthetic real smoke turn; no write role, GitHub, automatic project execution, release candidate, deployment or production
+Codex Runtime Adapter blocker: @openai/codex-sdk 0.144.4 has no per-run all-MCP disable option; empty mcp_servers config does not clear inherited servers; C:\ProgramData\OpenAI\Codex\requirements.toml is absent; implementation and real smoke remain fail-closed
+Codex Runtime Adapter repair budget: 0/1 consumed; no application code, package, lockfile, migration or test changes; real smoke turns executed: 0
 Cancellation contract: CANCELLATION-CONTRACT-DECISION-01 - APPROVED - DEVELOPMENT ONLY (target architecture; local FakeRuntime pre-start cancellation implemented; no Real-Runtime authorization)
 Cancellation contract normative SHA-256: 58e44fe0a3638d25bdf34dc5aff8551872796486c343904923cb4f41150a4b9f
 Worker Fake Runtime MVP scope reset: WORKER-FAKE-RUNTIME-MVP-SCOPE-RESET-01 - PASSED_WITH_DEFERRED_HARDENING - DEVELOPMENT ONLY
