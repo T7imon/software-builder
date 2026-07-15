@@ -52,6 +52,21 @@ describe("Persistence-Schema",()=>{
     expect(sql).toContain("invalid agent assignment status transition");
     expect(sql).toContain("agent_assignments_project_isolation");
   });
+  it("persistiert den Planning-ProcessInstance mit atomaren, unveraenderlichen Gates",()=>{
+    for(const table of ["planning_runs","planning_jobs","planning_review_requirements","planning_owner_decisions"]) expect(sql).toContain(`CREATE TABLE builder.${table}`);
+    expect(sql).toContain("planning_runs_project_revision_unique");
+    expect(sql).toContain("planning_jobs_run_role_unique");
+    expect(sql).toContain("planning jobs cannot be deleted");
+    expect(sql).toContain("accepted planning job result is immutable");
+    expect(sql).toContain("terminal planning run is immutable");
+    expect(sql).toContain("owner approval requires both successful terminal reviews");
+    expect(sql).toContain("approved revision must equal planning run revision");
+    expect(sql).toContain("PASS_WITH_REQUIREMENTS needs at least one persisted requirement");
+    expect(sql).toContain("planning runs must start in PLANNING without terminal metadata");
+    expect(sql).toContain("planning jobs must start without a result");
+    expect(sql).toContain("planning job runtime and assignment binding is inconsistent");
+    expect(sql).toContain("staged planning requirements and PASS_WITH_REQUIREMENTS must commit atomically");
+  });
   it("validiert opaque Capabilities, Ablauf und Signatur",async()=>{
     let now=new Date("2026-01-01T00:00:00Z"); const authority=new HmacCapabilityAuthority(new Uint8Array(32).fill(7),()=>now); const id="00000000-0000-4000-8000-000000000001" as ProjectId;
     const capability=authority.issueProject(id,{subject:"test-actor",actorScope:"TEST",allowedRoles:["TEST"],allowedOperations:["task:read"]},1000); expect((await authority.verifyProject(capability,{audience:"persistence",operation:"task:read"})).projectId).toBe(id);
