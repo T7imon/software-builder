@@ -12,5 +12,5 @@ Worker Fake Runtime MVP scope reset: WORKER-FAKE-RUNTIME-MVP-SCOPE-RESET-01 - PA
 Fake Runtime pre-start cancellation: FAKE-RUNTIME-PRESTART-CANCELLATION-01 - PASSED - DEVELOPMENT ONLY
 Real Runtime Hardening: REQUIRED - DEFERRED_TO_LATER_GATE - FAIL CLOSED
 Cancellation contract implementation: target architecture remains approved; full Real-Runtime implementation is assigned to REAL_RUNTIME_HARDENING and is not passed
-Agent Registry: AGENT-REGISTRY-01 - BLOCKED - DEVELOPMENT ONLY
-Agent Registry blocker: stable agentKey/agentId identity line and post-mutation rollback evidence require a new authorized task; repair ordinal 1/1 consumed
+Agent Registry: AGENT-REGISTRY-TUPLE-TYPECHECK-CLOSEOUT-03 - PASSED - DEVELOPMENT ONLY
+Agent Registry evidence: tuple Typecheck closeout complete; Unit 7/7, PostgreSQL 12/12 without skips, serial Root suite 231/231, Database and Root Typecheck, Lint, Build, git diff --check, QA, Reviewer and Security passed; Legal NOT_APPLICABLE
