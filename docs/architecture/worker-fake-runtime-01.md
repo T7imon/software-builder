@@ -74,3 +74,28 @@ Fuer diesen MVP bleiben der aktuelle vollstaendige Testlauf, der persistente ato
 Reale RuntimeTerminationEvidence, kryptografische oder providergebundene Attestation, echte externe `WORKLOAD_NOT_CREATED`-Attestation, verteilte finale Reconciliation, Codex-Statusabfrage, der Crash zwischen externer Abfrage und Evidence-Commit, vollstaendige AT-15/16/17/19/22-Production-Evidenz, Completion-ID-Hardening, reale Worker-/Prozessidentitaet und Provider-/Credential-Widerruf bleiben offen. Sie sind zwingend und fail-closed dem spaeteren Meilenstein `REAL_RUNTIME_HARDENING` zugeordnet.
 
 Der genehmigte Cancellation-Vertrag bleibt als Zielarchitektur in Kraft. Der Scope-Reset hebt ihn nicht auf, erlaubt keine echte Runtime und erzeugt keine Release-Candidate- oder Produktionsfreigabe. Massgeblich fuer den neuen Task sind Vertrag, Pruefnachweise, Reviews und Abschluss in `docs/architecture/worker-fake-runtime-mvp-scope-reset-01.md`.
+
+## MVP-Closeout durch `FAKE-RUNTIME-PRESTART-CANCELLATION-01`
+
+Der historische Abschluss von `WORKER-FAKE-RUNTIME-01` und seine damaligen weitergehenden Findings bleiben unveraendert dokumentiert. Sie werden nicht rueckwirkend umgeschrieben. Fuer den danach vom Owner definierten, engeren lokalen Meilenstein `WORKER_FAKE_RUNTIME_MVP` ist nun jedoch das einzige zuletzt offene aktuelle Kriterium 7 durch den separaten Task `FAKE-RUNTIME-PRESTART-CANCELLATION-01` erfuellt.
+
+Der Nachfolgertask implementiert ohne zweite Job-, Cancellation- oder Evidence-Schicht:
+
+- einen persistenten `RuntimeStartRequested`-Outbox-Auftrag mit eindeutigen Dispatch-/Supersede-Markern;
+- einen gemeinsamen PostgreSQL-Job-Row-Lock-/CAS-Vertrag fuer Runtime-Start und Cancellation;
+- die direkte atomare `CANCELLED`-Transition nur fuer persistent eindeutig nicht gestartete lokale Fake-Jobs;
+- das atomare Superseden eines geplanten, sicher nicht ausgelieferten Starts;
+- fail-closed `CANCELLING` fuer ausgelieferte oder unklare Starts sowie fuer stale Jobversion, Lease Generation oder Fencing Token;
+- Claim-/Lease-Invalidierung, Workflow-/Attempt-Projektion, genau ein Pre-start-Audit, Inbox-/Idempotency-Abschluss und genau das erforderliche `JobCancelled`-OutboxEvent in derselben Transaktion;
+- Schutz gegen alte Worker, CAS-Teilwirkungen, parallele Replays sowie Start-/Cancel-Races;
+- einen evidence-freien lokalen Pre-start-Pfad ohne Aufruf von `FakeAgentRuntime.cancelRun`.
+
+Der einzige automatische Reparaturdurchlauf `1/1` stabilisierte ausschliesslich die Isolation historischer Test-Fixtures; die produktive `claimNext(workerId, claimId, leaseMs)`-API blieb unveraendert. Danach bestanden der Executor- und der unabhaengige QA-Lauf: Pre-start 22/22, Start-/Cancel-Race 30/30 ohne Retry, PostgreSQL 66/66 ohne Skips, Agent Runtime 31/31, Worker 23/23, Workflow Engine 78/78, Root 212/212 ohne Skips, die drei Crash-/Restart-Ziellaeufe, Lint, Typecheck, Build und `git diff --check`.
+
+QA, Reviewer und Security gaben denselben fixierten technischen Stand ohne aktuelles Scope-Finding frei; Legal DE bestaetigte `NOT_APPLICABLE`. Damit sind alle elf Kriterien des `WORKER_FAKE_RUNTIME_MVP` bestanden.
+
+Aktueller Meilensteinstatus: `PASSED_WITH_DEFERRED_HARDENING - DEVELOPMENT ONLY`.
+
+Reale RuntimeTerminationEvidence, externe Attestation und Statusabfrage, verteilte finale Reconciliation, Completion-ID-Hardening, reale Worker-/Prozessidentitaet, Codex, Provider-/Credential-Widerruf, GitHub, Release Candidate, Deployment und Production bleiben unveraendert dem zwingenden spaeteren Meilenstein `REAL_RUNTIME_HARDENING` zugeordnet und fail-closed. Production deployment bleibt `DISABLED`.
+
+`WORKER UND FAKE RUNTIME MVP BESTANDEN  DEVELOPMENT ONLY`

@@ -49,7 +49,7 @@ export class AgentJobProcessor {
     try{
       if(control.cancellationRequested){await control.settleCancellation();return;}
       let status:RuntimeStatus;const persisted=await store.load(claim.task.runId);
-      if(persisted)status=await runtime.getRunStatus(store.command("getRunStatus"));else status=await runtime.startRun(store.command("startRun"));
+      if(persisted)status=await runtime.getRunStatus(store.command("getRunStatus"));else{await this.repository.authorizeRuntimeStart({...store.guard(),jobVersion:claim.jobVersion,leaseGeneration:claim.leaseGeneration});if(control.cancellationRequested){await control.settleCancellation();return;}if(control.leaseLost)return;status=await runtime.startRun(store.command("startRun"));}
       if(claim.retryCount>0&&status.state==="RETRY_PENDING")status=await runtime.continueRun(store.command("continueRun"));
       await this.options.afterRuntimePersisted?.();
       if(control.cancellationRequested){await control.settleCancellation();return;}

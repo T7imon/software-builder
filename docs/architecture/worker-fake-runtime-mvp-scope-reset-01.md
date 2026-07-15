@@ -136,3 +136,45 @@ Offenes Finding: ausschliesslich MVP-Kriterium 7, atomarer terminaler Cancel ein
 `PROJECT_STATE.md` bleibt deshalb `BLOCKED - DEVELOPMENT ONLY`; der fuer einen erfolgreichen Development-Abschluss vorgesehene Status `PASSED_WITH_DEFERRED_HARDENING - DEVELOPMENT ONLY` wird nicht gesetzt. GitHub integration bleibt `NO`, Automatic project execution bleibt `NO`, Production deployment bleibt `DISABLED`.
 
 `WORKER UND FAKE RUNTIME MVP NICHT BESTANDEN`
+
+## Nachfolger-Closeout `FAKE-RUNTIME-PRESTART-CANCELLATION-01`
+
+Die vorstehenden Abschnitte bleiben das unveraenderte historische Protokoll des Dokumentationstasks `WORKER-FAKE-RUNTIME-MVP-SCOPE-RESET-01`: Zu diesem Zeitpunkt war MVP-Kriterium 7 zu Recht blockiert. Der vom Owner danach separat autorisierte Implementierungstask `FAKE-RUNTIME-PRESTART-CANCELLATION-01` hat genau dieses eine aktuelle Kriterium geschlossen. Dieser Nachfolger-Closeout ersetzt den heutigen Meilensteinstatus, ohne den frueheren Blocker oder dessen damalige Review-Entscheidungen rueckwirkend umzuschreiben.
+
+### Aktuelle MVP-Akzeptanzmatrix
+
+| Nr. | Kriterium | Status | Nachweis nach dem Nachfolgertask |
+|---:|---|---|---|
+| 1 | `AgentRuntime`-Schnittstelle | `PASS` | Runtime- und Root-Tests |
+| 2 | Deterministische Fake-Modi Erfolg, Fehler, Timeout und Abbruch | `PASS` | Runtime-, Worker- und PostgreSQL-Tests |
+| 3 | Persistenter Claim | `PASS` | PostgreSQL-Integration |
+| 4 | Lease, Generation und Fencing | `PASS` | Lock-/Lease-/Reclaim-Integration |
+| 5 | Retry-Limit | `PASS` | Runtime-/Worker-/PostgreSQL-Tests |
+| 6 | Restart ohne Jobverlust | `PASS` | Prozess-, Crash- und Restart-Integration |
+| 7 | Atomarer Pre-start-Cancel | `PASS` | Migration 009, `AgentJobRepository`, Worker-Startautorisierung und PRESTART-01 bis PRESTART-22 |
+| 8 | Unklarer Ausgang fail-closed | `PASS` | Ausgelieferte oder unklare Starts verwenden `CANCELLING`/`CANCEL_STUCK` |
+| 9 | Kein falsches `CANCELLED` oder `SUCCEEDED` | `PASS` | Race-, Completion-, Rollback- und Evidence-Negativtests |
+| 10 | Alle aktuellen Pflichtpruefungen | `PASS` | Post-Repair-Executor-Lauf und unabhaengiger QA-Lauf |
+| 11 | Production deployment bleibt `DISABLED` | `PASS` | Projektzustand und Abschlussreviews |
+
+### Aktuelle Pflichtpruefungen und Reviews
+
+- Pre-start-Fokus: 22/22 `PASS`, `--retry=0`.
+- Start-/Cancel-Race: 30/30 interne Iterationen `PASS`, `--retry=0`.
+- PostgreSQL: 66/66 `PASS`, 0 Skips.
+- Agent Runtime: 31/31 `PASS`; Worker: 23/23 `PASS`; Workflow Engine: 78/78 `PASS`.
+- Root: 212/212 `PASS` in 13 Dateien, 0 Skips.
+- PRESTART-18, PRESTART-19 und PRESTART-20: jeweils 1/1 `PASS`, ohne Retry.
+- Lint, Typecheck, Build und `git diff --check`: jeweils `PASS`.
+- QA: `PASS - DEVELOPMENT_ONLY`; Reviewer: `PASS`; Security: `PASS - DEVELOPMENT_ONLY`; Legal DE: `NOT_APPLICABLE`.
+- Alle Reviews liefen read-only auf demselben in `fake-runtime-prestart-cancellation-01.md` fixierten technischen Hashset. Aktuelle Scope-Findings: keine.
+
+### Aktueller Meilensteinabschluss
+
+Abschlussstatus: `PASSED_WITH_DEFERRED_HARDENING - DEVELOPMENT ONLY`.
+
+MVP-Kriterium 7 ist fuer den lokalen, synthetischen `FakeAgentRuntime`-Scope erfuellt. Start und Cancellation konkurrieren ueber denselben PostgreSQL-Job-Row-Lock-/CAS-Vertrag. Ein eindeutig nicht ausgelieferter Start kann atomar superseded und der Job terminal `CANCELLED` werden; ein ausgelieferter oder unklarer Start bleibt im fail-closed Runtime-Cancellation-Pfad. Der erfolgreiche direkte Pfad ruft `FakeAgentRuntime.cancelRun` nicht auf und erzeugt keine `RuntimeTerminationEvidence`.
+
+Alle zehn bereits dokumentierten Punkte des Meilensteins `REAL_RUNTIME_HARDENING` bleiben unveraendert `DEFERRED_TO_LATER_GATE - FAIL CLOSED`. Diese lokale Komponentenfreigabe autorisiert weder `AGENT_RUNTIME=codex` noch GitHub, automatische Projektausfuehrung, Release Candidate, Deployment oder Production. Production deployment bleibt `DISABLED`.
+
+`WORKER UND FAKE RUNTIME MVP BESTANDEN  DEVELOPMENT ONLY`

@@ -7,6 +7,7 @@ import { BackgroundWorker } from "./worker-loop.js";
 const task=(scenario:AgentTask["scenario"]):AgentTask=>({schemaVersion:1,projectId:"project/1",taskId:"task/1",attemptId:"attempt/1",runId:`run/${scenario.toLowerCase()}`,role:"EXECUTOR",scenario,inputRef:"synthetic/input",repairOrdinal:0});
 const claim=(scenario:AgentTask["scenario"],extra:Partial<AgentJobClaim>={}):AgentJobClaim=>({jobId:"job/1",projectId:"project/1",task:task(scenario),workerId:"worker/1",claimId:"claim/1",fencingToken:1,leaseGeneration:1,jobVersion:1,leaseExpiresAt:new Date(Date.now()+10_000),retryCount:0,maxRetries:2,cancelRequested:false,cancellationRequestId:null,cancellationSequence:null,completionSequence:null,runtimeWatermark:0,cancelAttemptCount:0,cancelMaxAttempts:3,cancelRemainingAttempts:3,cancelLastOutcome:null,cancelLastErrorCode:null,cancelConfirmedAt:null,cancelConfirmationKind:null,...extra});
 const repository=()=>({
+  authorizeRuntimeStart:vi.fn(async()=>undefined),
   appendProgress:vi.fn(async(guard:unknown,progress:unknown)=>{void guard;void progress;}),
   scheduleRetry:vi.fn(async(guard:unknown,code:unknown,delay:unknown)=>{void guard;void code;void delay;return{};}),
   complete:vi.fn(async(guard:unknown,result:unknown,message:unknown)=>{void guard;void result;void message;return{};}),
