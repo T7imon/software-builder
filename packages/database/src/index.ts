@@ -16,6 +16,7 @@ export type WorkflowLeaseGuardResult = "VALID" | "VERSION_CONFLICT" | "LEASE_INV
 export * from "./capabilities.js";
 export * from "./types.js";
 export * from "./workflow-repository.js";
+export * from "./agent-job-repository.js";
 
 interface ProjectRow { id: string; project_type: "FULL_STACK_WEB"; status: BuilderProject["status"]; version: number; created_at: Date; updated_at: Date; }
 interface TaskRow { id: string; project_id: string; milestone_id: string; task_type: string; statement_ref: string; acceptance_criteria_ref: string; status: TaskRecord["status"]; repair_count: number; version: number; created_at: Date; updated_at: Date; }

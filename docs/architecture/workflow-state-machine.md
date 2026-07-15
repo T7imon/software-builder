@@ -261,6 +261,8 @@ stateDiagram-v2
 
 `CANCELLED` means termination is proven. A disconnected stream or provider acknowledgement alone is insufficient.
 
+For background-job Completion/Cancellation races, the normative `DEVELOPMENT_ONLY` contract is `CANCELLATION-CONTRACT-DECISION-01` in `docs/architecture/cancellation-contract-decision-01.md`: the successful commit under the shared job-row lock and CAS/version is the linearization point; terminal `SUCCEEDED` is monotone; Cancellation committed first rejects every later success as `LATE_RESULT_DISCARDED`; and `CANCELLED` requires structured, scope-/job-/generation-bound `RuntimeTerminationEvidence` accepted by the common verifier. Status strings such as `PROCESS_TERMINATED` or `RECOVERY_CONFIRMED` are not proof. Missing proof remains `CANCELLING` or, after the prescribed final reconciliation and exhausted budget, `CANCEL_STUCK`/`MANUAL_HOLD`.
+
 Selected MVP targets are 10 seconds p95 for cooperative cancellation and 60 seconds p95 for forced QEMU guest termination. A confirmed cancelled partial output is quarantined for at most 24 hours unless a Security/Legal incident hold applies; unconfirmed termination enters `MANUAL_HOLD` and blocks another writer.
 
 ## 13. Quality and Review Obligations
