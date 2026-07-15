@@ -1,4 +1,5 @@
-import { FakeAgentRuntime, SchemaValidationError, type AgentResult, type AgentRuntime, type RuntimeStatus, type RuntimeStore } from "@software-builder/agent-runtime";
+import { createHash } from "node:crypto";
+import { FakeAgentRuntime, SchemaValidationError, type AgentResult, type AgentRuntime, type RuntimeStatus, type RuntimeStore, type RuntimeTerminationVerificationDecision } from "@software-builder/agent-runtime";
 import { AgentJobCancellationRequestedError, AgentJobLeaseLostError, type AgentJobClaim, type AgentJobRepository } from "@software-builder/database";
 import { PostgresRuntimeStore } from "./postgres-runtime-store.js";
 
@@ -65,18 +66,26 @@ export class AgentJobProcessor {
     }catch(error){
       if(control.leaseLost||error instanceof AgentJobLeaseLostError){control.loseLease();await control.settleCancellation();return;}
       if(error instanceof AgentJobCancellationRequestedError){control.requestCancellation();await control.settleCancellation();return;}
+      if(control.cancellationRequested){await control.settleCancellation();return;}
       if(error instanceof SchemaValidationError){await this.repository.fail(store.guard(),error.code);return;}
       throw error;
     }
   }
 
   private async cancel(store:PostgresRuntimeStore,runtime:AgentRuntime):Promise<void>{
-    let observed:RuntimeStatus|undefined;const persisted=await store.load(store.claim.task.runId);
+    const operationId=`reconcile:${store.claim.jobId}:${store.claim.cancellationRequestId}:${store.claim.cancelAttemptCount}:${store.claim.leaseGeneration}:${store.claim.fencingToken}`;
+    const inputDigest=createHash("sha256").update(JSON.stringify({operationId,jobId:store.claim.jobId,jobVersion:store.claim.jobVersion,cancellationRequestId:store.claim.cancellationRequestId,cancellationSequence:store.claim.cancellationSequence,leaseGeneration:store.claim.leaseGeneration,fencingToken:store.claim.fencingToken,startWatermark:store.claim.runtimeWatermark,attemptCount:store.claim.cancelAttemptCount,maxAttempts:store.claim.cancelMaxAttempts})).digest("hex");
+    await this.repository.beginCancellationReconciliation(store.guard(),{operationId,inputDigest});const executionToken=await this.repository.claimCancellationReconciliationExecution(store.guard(),operationId);if(!executionToken)return;
+    let observed:RuntimeStatus;const persisted=await store.load(store.claim.task.runId);
     if(persisted)observed=await runtime.getRunStatus(store.command("getRunStatus"));
-    else if(store.claim.cancelAttemptCount>0)throw new Error("CANCELLATION_STATUS_QUERY_REQUIRED");
+    else {if(!runtime.attestWorkloadNotCreated)throw new Error("WORKLOAD_NOT_CREATED_ATTESTATION_UNAVAILABLE");observed=await runtime.attestWorkloadNotCreated(store.command("attestWorkloadNotCreated"));}
+    await store.persistProgress(observed);
     if(observed?.terminal&&observed.result&&observed.result.status!=="CANCELLED")await this.repository.complete(store.guard(),observed.result,this.messageId(store.claim,`late-result:${this.watermark(observed)}`));
-    if(observed?.terminationEvidence&&await this.confirmEvidence(store,observed))return;
-    if(persisted)await this.repository.recordCancellationReconciliation(store.guard(),this.watermark(observed),observed?.terminationEvidence?1:0,this.messageId(store.claim,`status-query:${store.claim.cancelAttemptCount}:${this.watermark(observed)}`));
+    await this.repository.recordCancellationReconciliationObservation(store.guard(),operationId,{statusQueryOperationId:this.messageId(store.claim,`status-query:${store.claim.cancelAttemptCount}:${this.watermark(observed)}`),runtimeQueryResult:{runId:observed.runId,state:observed.state,terminal:observed.terminal,retryCount:observed.retryCount},finalWatermark:this.watermark(observed),ingestedRuntimeEventRefs:observed.progress.map(item=>`${item.runId}:${item.sequence}`),evidenceCandidates:observed.terminationEvidence?[observed.terminationEvidence]:[]});
+    const decisions:RuntimeTerminationVerificationDecision[]=[];
+    if(observed.terminationEvidence){const decision=await this.repository.verifyTerminationEvidence(store.guard(),observed.terminationEvidence);decisions.push(decision);if(decision.validity==="VALID"){await this.repository.finalizeCancellationReconciliation(store.guard(),operationId,executionToken,decisions,"CANCELLED",observed.terminationEvidence.evidenceId);return;}}
+    if(store.claim.cancelAttemptCount>=store.claim.cancelMaxAttempts){await this.repository.finalizeCancellationReconciliation(store.guard(),operationId,executionToken,decisions,"CANCEL_STUCK");return;}
+    await this.repository.finalizeCancellationReconciliation(store.guard(),operationId,executionToken,decisions,"RETRY_SCHEDULED");
     const started=await this.repository.beginCancellationAttempt(store.guard());if(!started.started){await this.repository.markCancellationStuck(store.guard(),this.watermark(observed));return;}
     let status:RuntimeStatus;try{
       status=await this.withCancellationTimeout(runtime.cancelRun(store.command("cancelRun")));

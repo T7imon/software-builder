@@ -113,5 +113,5 @@ export function parseAgentResult(value: unknown): AgentResult {
   return result;
 }
 
-export type AgentRuntimeOperation="startRun"|"continueRun"|"cancelRun"|"getRunStatus"|"enqueue";
+export type AgentRuntimeOperation="startRun"|"continueRun"|"cancelRun"|"getRunStatus"|"attestWorkloadNotCreated"|"enqueue";
 export function canonicalAgentOperationDigest(operation:AgentRuntimeOperation,task:AgentTask):string{const value=parseAgentTask(task);return createHash("sha256").update(JSON.stringify({operation,schemaVersion:value.schemaVersion,projectId:value.projectId,taskId:value.taskId,attemptId:value.attemptId,runId:value.runId,role:value.role,scenario:value.scenario,inputRef:value.inputRef,repairOrdinal:value.repairOrdinal})).digest("hex");}

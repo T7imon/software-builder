@@ -5,7 +5,7 @@ export type RuntimeTerminationEvidenceType="RUNTIME_TERMINATION_ATTESTATION"|"PR
 export type RuntimeTerminationEnvironment="DEVELOPMENT"|"TEST"|"RELEASE_CANDIDATE"|"PRODUCTION";
 export type RuntimeTerminationVerificationMethod="SIGNED_RUNTIME_ATTESTATION_V1"|"LOCAL_PROCESS_ATTESTATION_V1"|"FAKE_DETERMINISTIC_V1";
 export type RuntimeTerminationTerminalState="TERMINATED"|"CANCELLED"|"EXITED"|"NOT_CREATED"|"SUCCEEDED"|"FAILED"|"TIMED_OUT"|"BLOCKED";
-export interface RuntimeTerminationAttestationPayload {readonly format:"FAKE_DETERMINISTIC_V1";readonly terminalState:RuntimeTerminationTerminalState;readonly workloadId:string;readonly runtimeEventSequence:number;}
+export interface RuntimeTerminationAttestationPayload {readonly format:"FAKE_DETERMINISTIC_V1";readonly terminalState:RuntimeTerminationTerminalState;readonly workloadId:string|null;readonly startOperationId?:string|undefined;readonly runtimeEventSequence:number;}
 export type RuntimeTerminationRejectionReason="MALFORMED"|"DIGEST_MISMATCH"|"UNTRUSTED_ISSUER"|"UNSUPPORTED_METHOD"|"NOT_TERMINAL"|"STALE"|"PROJECT_SCOPE_MISMATCH"|"RUNTIME_SCOPE_MISMATCH"|"AGENT_RUN_SCOPE_MISMATCH"|"JOB_SCOPE_MISMATCH"|"WORKLOAD_SCOPE_MISMATCH"|"CANCELLATION_SCOPE_MISMATCH"|"LEASE_GENERATION_MISMATCH"|"FENCING_TOKEN_MISMATCH"|"REPLAYED"|"ENVIRONMENT_NOT_ALLOWED"|"VERIFIER_ERROR";
 
 export interface RuntimeTerminationEvidenceCandidate {
@@ -18,6 +18,7 @@ export interface RuntimeTerminationEvidenceCandidate {
   readonly attemptId:string;
   readonly jobId:string;
   readonly cancellationRequestId:string;
+  readonly startOperationId?:string|undefined;
   readonly workloadId:string|null;
   readonly processIdentity:string|null;
   readonly leaseGeneration:number;
@@ -36,7 +37,7 @@ export interface RuntimeTerminationEvidenceCandidate {
 
 export interface PriorRuntimeTerminationEvidence {readonly evidenceId:string;readonly evidenceDigest:string;readonly scopeKey:string;readonly validity:"VALID"|"REJECTED";readonly consumed:boolean;}
 export interface RuntimeTerminationExpectedContext {
-  readonly projectId:string;readonly runtimeId:string;readonly agentRunId:string;readonly attemptId:string;readonly jobId:string;readonly cancellationRequestId:string;
+  readonly projectId:string;readonly runtimeId:string;readonly agentRunId:string;readonly attemptId:string;readonly jobId:string;readonly cancellationRequestId:string;readonly startOperationId?:string;
   readonly workloadId:string|null;readonly processIdentity:string|null;readonly allowedLeaseGenerations:readonly number[];readonly allowedFencingTokens:readonly number[];
   readonly cancellationSequence:number;readonly minimumRuntimeEventSequence:number;readonly environment:RuntimeTerminationEnvironment;readonly policyVersion:string;
   readonly verifierIdentity:string;readonly now:string;readonly maximumAgeMs:number;readonly trustedIssuers:readonly string[];readonly supportedMethods:readonly RuntimeTerminationVerificationMethod[];
@@ -50,7 +51,7 @@ export interface RuntimeTerminationEvidenceVerifier {verify(candidate:RuntimeTer
 const canonical=(value:unknown):unknown=>Array.isArray(value)?value.map(canonical):value&&typeof value==="object"?Object.fromEntries(Object.entries(value).filter(([key])=>key!=="evidenceDigest").sort(([a],[b])=>a.localeCompare(b)).map(([key,item])=>[key,canonical(item)])):value;
 export const runtimeTerminationEvidenceDigest=(candidate:Omit<RuntimeTerminationEvidenceCandidate,"evidenceDigest">|RuntimeTerminationEvidenceCandidate):string=>createHash("sha256").update(JSON.stringify(canonical(candidate))).digest("hex");
 export const runtimeTerminationAttestationPayloadDigest=(payload:RuntimeTerminationAttestationPayload):string=>createHash("sha256").update(JSON.stringify(canonical(payload))).digest("hex");
-export const runtimeTerminationEvidenceScopeKey=(candidate:Pick<RuntimeTerminationEvidenceCandidate,"projectId"|"runtimeId"|"agentRunId"|"attemptId"|"jobId"|"cancellationRequestId"|"workloadId"|"processIdentity">):string=>[candidate.projectId,candidate.runtimeId,candidate.agentRunId,candidate.attemptId,candidate.jobId,candidate.cancellationRequestId,candidate.workloadId??"",candidate.processIdentity??""].join("\0");
+export const runtimeTerminationEvidenceScopeKey=(candidate:Pick<RuntimeTerminationEvidenceCandidate,"projectId"|"runtimeId"|"agentRunId"|"attemptId"|"jobId"|"cancellationRequestId"|"startOperationId"|"workloadId"|"processIdentity">):string=>[candidate.projectId,candidate.runtimeId,candidate.agentRunId,candidate.attemptId,candidate.jobId,candidate.cancellationRequestId,candidate.startOperationId,candidate.workloadId??"",candidate.processIdentity??""].join("\0");
 
 export class DefaultRuntimeTerminationEvidenceVerifier implements RuntimeTerminationEvidenceVerifier {
   verify(candidate:RuntimeTerminationEvidenceCandidate,context:RuntimeTerminationExpectedContext):RuntimeTerminationVerificationDecision {
@@ -60,12 +61,21 @@ export class DefaultRuntimeTerminationEvidenceVerifier implements RuntimeTermina
       const environments:readonly RuntimeTerminationEnvironment[]=["DEVELOPMENT","TEST","RELEASE_CANDIDATE","PRODUCTION"];
       const methods:readonly RuntimeTerminationVerificationMethod[]=["SIGNED_RUNTIME_ATTESTATION_V1","LOCAL_PROCESS_ATTESTATION_V1","FAKE_DETERMINISTIC_V1"];
       const terminalStates:readonly RuntimeTerminationTerminalState[]=["TERMINATED","CANCELLED","EXITED","NOT_CREATED","SUCCEEDED","FAILED","TIMED_OUT","BLOCKED"];
-      if(!candidate||candidate.schemaVersion!==1||!candidate.evidenceId||!evidenceTypes.includes(candidate.evidenceType)||!candidate.attemptId||!candidate.issuedBy||!environments.includes(candidate.issuerEnvironment)||!methods.includes(candidate.verificationMethod)||!terminalStates.includes(candidate.terminalState)||!candidate.observedAt||!Number.isSafeInteger(candidate.leaseGeneration)||!Number.isSafeInteger(candidate.fencingToken)||!Number.isSafeInteger(candidate.cancellationSequence)||!Number.isSafeInteger(candidate.runtimeEventSequence)||(candidate.workloadId===null)===(candidate.processIdentity===null)||!candidate.attestationPayload||candidate.attestationPayload.format!=="FAKE_DETERMINISTIC_V1"||!candidate.attestationPayloadDigest)return reject("MALFORMED");
+      const negative=candidate.evidenceType==="WORKLOAD_NOT_CREATED";
+      if(!candidate||candidate.schemaVersion!==1||!candidate.evidenceId||!evidenceTypes.includes(candidate.evidenceType)||!candidate.attemptId||(negative&&!candidate.startOperationId)||!candidate.issuedBy||!environments.includes(candidate.issuerEnvironment)||!methods.includes(candidate.verificationMethod)||!terminalStates.includes(candidate.terminalState)||!candidate.observedAt||!Number.isSafeInteger(candidate.leaseGeneration)||!Number.isSafeInteger(candidate.fencingToken)||!Number.isSafeInteger(candidate.cancellationSequence)||!Number.isSafeInteger(candidate.runtimeEventSequence)||(!negative&&(candidate.workloadId===null)===(candidate.processIdentity===null))||(negative&&(candidate.workloadId!==null||candidate.processIdentity!==null||candidate.terminalState!=="NOT_CREATED"))||!candidate.attestationPayload||candidate.attestationPayload.format!=="FAKE_DETERMINISTIC_V1"||!candidate.attestationPayloadDigest)return reject("MALFORMED");
+      if(context.priorEvidence&&(context.priorEvidence.evidenceDigest!==candidate.evidenceDigest||context.priorEvidence.scopeKey!==runtimeTerminationEvidenceScopeKey(candidate)))return reject("REPLAYED");
+      if(candidate.projectId!==context.projectId)return reject("PROJECT_SCOPE_MISMATCH");
+      if(candidate.runtimeId!==context.runtimeId)return reject("RUNTIME_SCOPE_MISMATCH");
+      if(candidate.agentRunId!==context.agentRunId||candidate.attemptId!==context.attemptId)return reject("AGENT_RUN_SCOPE_MISMATCH");
+      if(candidate.jobId!==context.jobId)return reject("JOB_SCOPE_MISMATCH");
+      if(candidate.cancellationRequestId!==context.cancellationRequestId||candidate.cancellationSequence!==context.cancellationSequence)return reject("CANCELLATION_SCOPE_MISMATCH");
+      if(!context.allowedLeaseGenerations.includes(candidate.leaseGeneration))return reject("LEASE_GENERATION_MISMATCH");
+      if(!context.allowedFencingTokens.includes(candidate.fencingToken))return reject("FENCING_TOKEN_MISMATCH");
       if(runtimeTerminationEvidenceDigest(candidate)!==candidate.evidenceDigest)return reject("DIGEST_MISMATCH");
-      if(runtimeTerminationAttestationPayloadDigest(candidate.attestationPayload)!==candidate.attestationPayloadDigest||candidate.attestationPayload.terminalState!==candidate.terminalState||candidate.attestationPayload.workloadId!==candidate.workloadId||candidate.attestationPayload.runtimeEventSequence!==candidate.runtimeEventSequence)return reject("DIGEST_MISMATCH");
+      if(runtimeTerminationAttestationPayloadDigest(candidate.attestationPayload)!==candidate.attestationPayloadDigest||candidate.attestationPayload.terminalState!==candidate.terminalState||candidate.attestationPayload.workloadId!==candidate.workloadId||candidate.attestationPayload.startOperationId!==candidate.startOperationId||candidate.attestationPayload.runtimeEventSequence!==candidate.runtimeEventSequence)return reject("DIGEST_MISMATCH");
       if(!context.trustedIssuers.includes(candidate.issuedBy))return reject("UNTRUSTED_ISSUER");
       if(candidate.verificationMethod!=="FAKE_DETERMINISTIC_V1"||!context.supportedMethods.includes(candidate.verificationMethod))return reject("UNSUPPORTED_METHOD");
-      if(candidate.evidenceType!=="FAKE_RUNTIME_TERMINATION")return reject("UNSUPPORTED_METHOD");
+      if(candidate.evidenceType!=="FAKE_RUNTIME_TERMINATION"&&candidate.evidenceType!=="WORKLOAD_NOT_CREATED")return reject("UNSUPPORTED_METHOD");
       if(context.priorEvidence&&(context.priorEvidence.evidenceDigest!==candidate.evidenceDigest||context.priorEvidence.scopeKey!==runtimeTerminationEvidenceScopeKey(candidate)))return reject("REPLAYED");
       if(candidate.projectId!==context.projectId)return reject("PROJECT_SCOPE_MISMATCH");
       if(candidate.runtimeId!==context.runtimeId)return reject("RUNTIME_SCOPE_MISMATCH");
@@ -73,7 +83,8 @@ export class DefaultRuntimeTerminationEvidenceVerifier implements RuntimeTermina
       if(candidate.attemptId!==context.attemptId)return reject("AGENT_RUN_SCOPE_MISMATCH");
       if(candidate.jobId!==context.jobId)return reject("JOB_SCOPE_MISMATCH");
       if(candidate.cancellationRequestId!==context.cancellationRequestId||candidate.cancellationSequence!==context.cancellationSequence)return reject("CANCELLATION_SCOPE_MISMATCH");
-      if(candidate.workloadId!==context.workloadId||candidate.processIdentity!==context.processIdentity)return reject("WORKLOAD_SCOPE_MISMATCH");
+      if(context.startOperationId!==undefined&&candidate.startOperationId!==context.startOperationId)return reject("WORKLOAD_SCOPE_MISMATCH");
+      if(!negative&&(candidate.workloadId!==context.workloadId||candidate.processIdentity!==context.processIdentity))return reject("WORKLOAD_SCOPE_MISMATCH");
       if(!context.allowedLeaseGenerations.includes(candidate.leaseGeneration))return reject("LEASE_GENERATION_MISMATCH");
       if(!context.allowedFencingTokens.includes(candidate.fencingToken))return reject("FENCING_TOKEN_MISMATCH");
       if(candidate.runtimeEventSequence<context.minimumRuntimeEventSequence)return reject("STALE");
