@@ -44,7 +44,7 @@ export class AgentJobProcessor {
 
   async process(claim:AgentJobClaim,control=new JobExecutionControl()):Promise<void>{
     const store=new PostgresRuntimeStore(this.repository,claim);const runtime=this.runtimeFactory(store);
-    control.registerCancellationHandler(async()=>{if(control.leaseLost)return;await this.cancel(store,runtime);});
+    control.registerCancellationHandler(async()=>{if(control.leaseLost)return;const refreshed=await this.repository.loadClaim(store.guard());const cancellationStore=new PostgresRuntimeStore(this.repository,refreshed);await this.cancel(cancellationStore,this.runtimeFactory(cancellationStore));});
     if(claim.cancelRequested)control.requestCancellation();
     try{
       if(control.cancellationRequested){await control.settleCancellation();return;}
@@ -71,25 +71,27 @@ export class AgentJobProcessor {
   }
 
   private async cancel(store:PostgresRuntimeStore,runtime:AgentRuntime):Promise<void>{
-    const started=await this.repository.beginCancellationAttempt(store.guard());if(!started.started)return;
-    try{
-      const status=await this.withCancellationTimeout(runtime.cancelRun(store.command("cancelRun")));
-      if(status.state==="CANCELLED"&&status.terminal&&status.result?.status==="CANCELLED"){
-        await store.persistProgress(status);
-        await this.repository.confirmCancelled(store.guard(),status.result,this.messageId(store.claim,"cancelled"),"RUNTIME_CANCEL_CONFIRMED");
-        return;
-      }
-      if(status.terminal){
-        await this.repository.confirmCancelled(store.guard(),this.cancelledResult(store.claim),this.messageId(store.claim,"cancelled"),"RUNTIME_TERMINAL_OBSERVED");
-        return;
-      }
-      await this.repository.recordCancellationFailure(store.guard(),"REJECTED","RUNTIME_CANCEL_REJECTED",this.cancellationRetryDelayMs);
+    let observed:RuntimeStatus|undefined;const persisted=await store.load(store.claim.task.runId);
+    if(persisted)observed=await runtime.getRunStatus(store.command("getRunStatus"));
+    else if(store.claim.cancelAttemptCount>0)throw new Error("CANCELLATION_STATUS_QUERY_REQUIRED");
+    if(observed?.terminal&&observed.result&&observed.result.status!=="CANCELLED")await this.repository.complete(store.guard(),observed.result,this.messageId(store.claim,`late-result:${this.watermark(observed)}`));
+    if(observed?.terminationEvidence&&await this.confirmEvidence(store,observed))return;
+    if(persisted)await this.repository.recordCancellationReconciliation(store.guard(),this.watermark(observed),observed?.terminationEvidence?1:0,this.messageId(store.claim,`status-query:${store.claim.cancelAttemptCount}:${this.watermark(observed)}`));
+    const started=await this.repository.beginCancellationAttempt(store.guard());if(!started.started){await this.repository.markCancellationStuck(store.guard(),this.watermark(observed));return;}
+    let status:RuntimeStatus;try{
+      status=await this.withCancellationTimeout(runtime.cancelRun(store.command("cancelRun")));
     }catch(error){
       if(error instanceof AgentJobLeaseLostError)throw error;
       const timeout=error instanceof RuntimeCancellationTimeoutError;
-      await this.repository.recordCancellationFailure(store.guard(),timeout?"TIMED_OUT":"FAILED",timeout?"RUNTIME_CANCEL_TIMEOUT":"RUNTIME_CANCEL_FAILED",this.cancellationRetryDelayMs);
+      await this.repository.recordCancellationFailure(store.guard(),timeout?"TIMED_OUT":"FAILED",timeout?"RUNTIME_CANCEL_TIMEOUT":"RUNTIME_CANCEL_FAILED",this.cancellationRetryDelayMs,this.watermark(observed));
+      return;
     }
+    if(status.terminationEvidence&&await this.confirmEvidence(store,status))return;
+    await this.repository.recordCancellationFailure(store.guard(),"REJECTED",status.terminal?"TERMINATION_EVIDENCE_MISSING":"RUNTIME_CANCEL_REJECTED",this.cancellationRetryDelayMs,this.watermark(status));
   }
+
+  private async confirmEvidence(store:PostgresRuntimeStore,status:RuntimeStatus):Promise<boolean>{const candidate=status.terminationEvidence;if(!candidate)return false;const decision=await this.repository.verifyTerminationEvidence(store.guard(),candidate);if(decision.validity!=="VALID")return false;await this.repository.confirmCancelled(store.guard(),this.cancelledResult(store.claim),this.messageId(store.claim,`cancelled:${candidate.evidenceId}`),candidate.evidenceId);return true;}
+  private watermark(status:RuntimeStatus|undefined):number{return status?.progress.at(-1)?.sequence??0;}
 
   private withCancellationTimeout(operation:Promise<RuntimeStatus>):Promise<RuntimeStatus>{
     let timer:ReturnType<typeof setTimeout>|undefined;
