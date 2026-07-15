@@ -3,6 +3,7 @@ import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import type { ProjectId } from "@software-builder/core";
 import type { ProjectWorkflow, WorkflowPersistenceProjection } from "@software-builder/workflow-engine";
 import type { BootstrapCapability, BootstrapCapabilityVerifier, BuilderProject, CommandEnvelope, CommandResult, CreateProjectInput, EntityMutation, ProjectCapability, ProjectCapabilityVerifier, ProjectContextIssuer, TaskRecord, VerifiedProjectCapability } from "./types.js";
+import { PostgresAgentAssignmentRepository } from "./agent-assignment.js";
 import { PostgresAgentRegistryRepository } from "./agent-registry.js";
 
 export interface WorkflowLeaseGuard {
@@ -18,6 +19,7 @@ export * from "./capabilities.js";
 export * from "./types.js";
 export * from "./workflow-repository.js";
 export * from "./agent-job-repository.js";
+export * from "./agent-assignment.js";
 export * from "./agent-registry.js";
 
 interface ProjectRow { id: string; project_type: "FULL_STACK_WEB"; status: BuilderProject["status"]; version: number; created_at: Date; updated_at: Date; }
@@ -124,6 +126,7 @@ class TaskRepository extends DomainRepository<"task"> {
 }
 
 export class PostgresDatabase {
+  readonly agentAssignments = new PostgresAgentAssignmentRepository((capability,operation,action)=>this[readSession](capability,operation,action));
   readonly agentRegistry = new PostgresAgentRegistryRepository((capability,operation,action)=>this[readSession](capability,operation,action));
   readonly projects = new ProjectRepository(this);
   readonly projectBriefs = new DomainRepository(this, "project_brief", "project_briefs");
