@@ -42,6 +42,16 @@ describe("Persistence-Schema",()=>{
     expect(sql).toContain("termination_evidence_project_job_fk");
     expect(sql).toContain("job_audit_events_project_job_fk");
   });
+  it("erzwingt unveraenderliche konkrete Agent-Zuweisungen in PostgreSQL",()=>{
+    expect(sql).toContain("CREATE TABLE builder.agent_assignments");
+    expect(sql).toContain("agent_assignments_job_id_unique");
+    expect(sql).toContain("agent_assignments_registry_version_fk");
+    expect(sql).toContain("agent_assignments_single_active_role_check");
+    expect(sql).toContain("agent_assignments_runtime_role_check");
+    expect(sql).toContain("agent assignment binding is immutable");
+    expect(sql).toContain("invalid agent assignment status transition");
+    expect(sql).toContain("agent_assignments_project_isolation");
+  });
   it("validiert opaque Capabilities, Ablauf und Signatur",async()=>{
     let now=new Date("2026-01-01T00:00:00Z"); const authority=new HmacCapabilityAuthority(new Uint8Array(32).fill(7),()=>now); const id="00000000-0000-4000-8000-000000000001" as ProjectId;
     const capability=authority.issueProject(id,{subject:"test-actor",actorScope:"TEST",allowedRoles:["TEST"],allowedOperations:["task:read"]},1000); expect((await authority.verifyProject(capability,{audience:"persistence",operation:"task:read"})).projectId).toBe(id);
