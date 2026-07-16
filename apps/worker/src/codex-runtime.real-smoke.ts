@@ -370,7 +370,7 @@ describe.skipIf(!enabled)("real Codex Exec PLANNER smoke", () => {
       planningTask: "Read PROJECT.md and return one concise requirements plan for the synthetic status endpoint.",
       createdBy: "codex-real-smoke",
     });
-    const claim = await runtimeJobs.claimNext("codex-real-smoke-worker", "codex-real-smoke-claim", 300_000);
+    const claim = await runtimeJobs.claimNext("codex-real-smoke-worker", "codex-real-smoke-claim", 120_000);
     if (!claim || claim.jobId !== enqueued.jobId) throw new Error("Unexpected real Codex smoke claim");
 
     const beforeDigest = await workspaceDigest(workspace.absolutePath);

@@ -398,3 +398,105 @@ Reparaturbudget: `1/1 verbraucht`. Der Read-only-Pre-Smoke-Audit fand, dass die 
 Das Fehlen einer systemweiten `C:\ProgramData\OpenAI\Codex\requirements.toml` wurde nicht als Blocker dieses isolierten lokalen MVP-Scopes gewertet, und keine systemweite Policy wurde veraendert. Fuer `PRODUCTION` bleiben Managed Policy oder gleichwertige Provider-Isolation, systemweit erzwungene MCP-Grenze, belastbare Prozessbaumterminierung, reale Runtime-Attestation und externe Statusabfrage, mehrprozessfaehige Reconciliation, Completion-ID-Hardening, echte Worker-/Prozessidentitaet, Credential-Widerruf sowie alle Provider-, Release-, Legal- und Owner-Gates fail-closed verschoben. Production deployment bleibt `DISABLED`; GitHub-Integration und automatische Projektausfuehrung bleiben `NO`.
 
 Der exakte Erfolgsstatus `CODEX EXEC RUNTIME ADAPTER MVP BESTANDEN  DEVELOPMENT ONLY` wird nicht vergeben.
+
+# CODEX-RUNTIME-SMOKE-LEASE-FIX-03
+
+Release level: `DEVELOPMENT_ONLY`
+
+Production deployment: `DISABLED`
+
+## Unveraenderlicher Micro-Fix-Task-Vertrag
+
+- **Task:** `CODEX-RUNTIME-SMOKE-LEASE-FIX-03`
+- **Branch:** `feature/codex-runtime-adapter-mvp`
+- **Ausgangsstand:** `761e23f3cc100436dd8d4a6df1ad7cd259122b63`
+- **Vertragsbeginn:** 2026-07-15T23:37:50+02:00
+- **Maximales Zeitbudget:** eine lokale Arbeitssitzung von hoechstens zwei Stunden, spaetestens bis 2026-07-16T01:37:50+02:00
+- **Writer-Identitaet:** genau und ausschliesslich `CODEX-RUNTIME-SMOKE-LEASE-FIX-03-EXECUTOR`; nur diese Identitaet darf die erlaubte Anwendungscodezeile schreiben; ein Writer-Wechsel ist verboten
+- **Reparaturbudget:** `0/0`; nach der einmaligen beauftragten Wertkorrektur ist keine automatische weitere Codekorrektur zulaessig
+- **Echter-Smoke-Budget:** genau ein neuer echter Read-only-Codex-Smoke-Start; sobald der Codex-Prozess tatsaechlich gestartet wurde, sind Retry und zweiter echter Turn verboten
+- **Zulaessige Abschlussstatus:** `PASSED`, `BLOCKED`, `DEFERRED_TO_LATER_GATE`
+- **Freigabestufe:** ausschliesslich `DEVELOPMENT_ONLY`
+- **Exakter Erfolgsstatus:** `CODEX EXEC RUNTIME ADAPTER MVP BESTANDEN  DEVELOPMENT ONLY`
+
+Dieser Vertrag ist ab seiner Fixierung unveraenderlich. Nachfolgende Abschnitte duerfen ausschliesslich Vorpruefungs-, Smoke-, Gate-, Review- und Abschlussnachweise ergaenzen; Scope, Writer-Identitaet, Zeitbudget, Reparaturbudget, Smoke-Budget, erlaubte Dateien, Gates oder Freigabestufe duerfen nicht erweitert oder umgedeutet werden. Der Task ist die ausdruecklich autorisierte Owner-Nachfolgeentscheidung zum strukturierten Blocker von `CODEX-EXEC-RUNTIME-ADAPTER-MVP-02` und verbraucht keinen Reparaturdurchlauf des Vorgaengertasks.
+
+### Scope, erlaubte Dateien und Abgrenzung
+
+Die einzige erlaubte Anwendungscodeaenderung ist in `apps/worker/src/codex-runtime.real-smoke.ts` der semantische Lease-Parameter des Aufrufs `claimNext(..., 300_000)` auf `120_000`. Der davon unabhaengige Run-/Test-Timeout `300_000`, das Datenbankmaximum, Produktions- und Runtime-Logik, Lease-Validierung, Heartbeat/Renewal, Cancellation, Migrationen, sonstige Tests und alle Sicherheitsgrenzen bleiben unveraendert.
+
+Der Hauptagent darf nach Vertragsfixierung und bei Abschluss ausschliesslich `docs/architecture/codex-runtime-adapter-mvp-01.md` und `PROJECT_STATE.md` dokumentieren. Keine weitere Anwendungscode-, Test-, Migrations-, Konfigurations-, Paket- oder Lockfileaenderung ist erlaubt. Commit, Push, Pull Request, Merge und Deployment sind verboten. GitHub integration bleibt `NO`, Automatic project execution bleibt `NO`, Production deployment bleibt `DISABLED`, Release level bleibt `DEVELOPMENT_ONLY`.
+
+### Pruefbare Akzeptanzkriterien und Gates
+
+1. Ausschliesslich der Smoke-Harness-Lease-Wert wird von `300_000` auf `120_000` korrigiert; alle anderen Anwendungscodewerte und Sicherheitsgrenzen bleiben unveraendert.
+2. Vor einem echten Turn bestehen Worker-Typecheck, Worker-Lint, alle betroffenen Tests ohne echten Codex-Aufruf und `git diff --check`; der Anwendungscode-Diff enthaelt exakt die eine Wertkorrektur.
+3. Mit gesetztem `BUILDER_CODEX_HOME`, `AGENT_RUNTIME=codex` und `CODEX_REAL_SMOKE_TEST=1` wird ueber den vorhandenen Repository-Befehl genau ein neuer echter Smoke gestartet; kein Retry ist zulaessig.
+4. Der Smoke weist genau einen Codex-Prozess, genau einen echten Turn, ausschliesslich `PLANNER`, Read-only-Sandbox, Approval `never`, `ignore-user-config`, `ignore-rules`, deaktivierte Websuche, keine MCP-/Web-Aktivitaet, strukturierte validierte Planner-Ausgabe, unveraenderten Zielworkspace und Git sowie keine Credential-Offenlegung nach.
+5. Bei bestandenem Smoke bestehen danach sequenziell Worker-Tests, Codex-Runtime-Tests, PostgreSQL-Integration ohne Skips, vollstaendige serielle Root-Suite, Lint, Typecheck, Build und `git diff --check`; parallele Datenbank-Reset-Laeufe sind verboten.
+6. Nach beendetem Writer-Zugriff pruefen QA, allgemeiner Reviewer und Security read-only denselben eindeutig fixierten Stand und stimmen innerhalb dieses Micro-Fix-Scopes jeweils mit `PASS`; Legal ist `NOT_APPLICABLE`.
+7. Abschlussdokumentation nennt geprueften Stand, exakte Testzahlen, Smoke-/MCP-/Web-/Workspace-/Git-Evidenz, Review-Voten, offene Findings mit Zielmeilenstein und eindeutigen Abschlussstatus.
+8. `PASSED` ist nur zulaessig, wenn alle vorstehenden Kriterien erfuellt sind; andernfalls endet der Task ohne weitere Codeaenderung oder Smoke-Wiederholung strukturiert `BLOCKED` beziehungsweise `DEFERRED_TO_LATER_GATE`.
+
+## Ausfuehrungs- und Abschlussnachweis
+
+- **Abschlussstatus:** `BLOCKED - DEVELOPMENT_ONLY`
+- **Gepruefter Anwendungsstand:** HEAD `761e23f3cc100436dd8d4a6df1ad7cd259122b63` plus exakt ein Anwendungscode-Hunk in `apps/worker/src/codex-runtime.real-smoke.ts:373`
+- **Writer:** ausschliesslich `CODEX-RUNTIME-SMOKE-LEASE-FIX-03-EXECUTOR`; Anwendungscode-Schreibzugriff nach der einmaligen Korrektur beendet
+- **Datei-SHA-256 vorher:** `72ce39367fcf345aacd0a9cb35a00310b25d299e2950102de496180148ba04f5`
+- **Datei-SHA-256 nachher und Review-Snapshot:** `2abeff866c6affd65274f70c222a28184c2ea47fca52b21f1e8032a6e747afbf`
+- **Reparaturbudget:** `0/0`; keine weitere Codeaenderung und kein Reparaturdurchlauf
+
+Der urspruengliche Fehler war ausschliesslich der semantische Claim-Lease-Wert `300_000` im echten Smoke-Harness. Er wurde als einzige Anwendungscodeaenderung auf das erlaubte Maximum `120_000` gesetzt. Das Repositorymaximum `120_000`, der unabhaengige Run-/Test-Timeout `300_000`, Produktions- und Runtime-Logik, Lease-Validierung, Heartbeat/Renewal, Cancellation, Migrationen, sonstige Tests und Sicherheitsgrenzen blieben unveraendert. Der alte Versuch aus `CODEX-EXEC-RUNTIME-ADAPTER-MVP-02` startete `0` Codex-Prozesse, `0` echte Turns und `0` Retries.
+
+### Vorpruefungen ohne echten Codex-Aufruf
+
+- Worker-Typecheck: `PASSED`
+- Worker-Lint: `PASSED`; ausschliesslich nicht-blockierender bestehender ESLint-Hinweis zur fehlenden Pages-Directory-Konfiguration
+- Worker: `42/42 PASSED`
+- Codex Runtime/CLI/Schema: `29/29 PASSED`
+- Provider/JSONL: `9/9 PASSED`
+- Smoke-Harness mit erzwungenem `AGENT_RUNTIME=fake` und `CODEX_REAL_SMOKE_TEST=0`: `1/1 SKIPPED` wie vorgesehen; kein Codex-Prozess
+- `git diff --check`: `PASSED`
+- Anwendungscode-Diff: exakt eine entfernte `claimNext(..., 300_000)`-Zeile und eine hinzugefuegte `claimNext(..., 120_000)`-Zeile; keine zweite Anwendungscode-Datei
+
+### Einziger aktivierter echter Smoke-Aufruf
+
+Der dokumentierte Befehl `npm.cmd run test:codex-smoke` wurde mit gesetztem `BUILDER_CODEX_HOME`, erzwungenem `AGENT_RUNTIME=codex`, `CODEX_REAL_SMOKE_TEST=1` und der bereits gesetzten loopback-gebundenen `_test`-Datenbank-URL genau einmal aktiviert. Es erfolgte kein Retry.
+
+Der Aufruf begann am 2026-07-16T05:52:54+02:00 und scheiterte fail-closed im `beforeAll` bei `waitForDatabaseQuiescence` mit einem sanitisierten PostgreSQL-Authentifizierungsfehler fuer den lokalen Testdatenbankbenutzer `builder`. Exaktes Vitest-Ergebnis: `1` Testdatei fehlgeschlagen, `1` Test uebersprungen. Der Testkoerper ab Zeile 237, `temporaryRoot`, `CountingLauncher` und `CodexExecProvider` wurden nicht erreicht.
+
+- gestartete Codex-Prozesse: `0`
+- gestartete echte Codex-Turns: `0`
+- Retries: `0`
+- strukturierte Planner-Ausgabe: `NOT_EVALUATED`
+- echter PLANNER-/Flag-Nachweis: `NOT_EVALUATED`
+- MCP-Tool-Calls und Websuche: `0`, weil kein Codex-Prozess existierte; der erforderliche dynamische Nachweis innerhalb eines echten Turns bleibt `NOT_EVALUATED`
+- temporaerer Zielworkspace: nicht erzeugt; daher keine Zielworkspace- oder Ziel-Git-Aenderung
+- Repositorystand unmittelbar vor/nach dem Aufruf: identische geaenderte Dateiliste und identischer Diff-Hash `aa62594288f8cfb05ef676af853d19c43c0431bb` vor der anschliessenden Abschlussdokumentation
+- Credential-Offenlegung: keine Credential-Werte ausgegeben; der Fehler enthielt nur die sanitisiert benannte lokale Testidentitaet
+
+Die im unveraenderlichen Vertrag fixierte Deadline 2026-07-16T01:37:50+02:00 war nach der externen Freigabewartezeit beim Aufruf bereits um `4:15:04` ueberschritten. Der Vertrag wird nicht nachtraeglich erweitert oder umgedeutet.
+
+### Nicht ausgefuehrte bedingte Abschlussgates
+
+Weil der echte Smoke nicht bestand, wurden die vertraglich nachgelagerten Worker-Tests, Codex-Runtime-Tests, PostgreSQL-Integration ohne Skips, vollstaendige serielle Root-Suite, Root-Lint, Root-Typecheck und Build nicht als Abschlussgates ausgefuehrt. Die gruenen Vorpruefungen ersetzen diese Gates nicht. Ein weiteres `git diff --check` unmittelbar nach dem fehlgeschlagenen Smoke bestand und bestaetigte den unveraenderten Ein-Zeilen-Anwendungscode-Diff.
+
+### Read-only-Review-Voten auf demselben Anwendungssnapshot
+
+- QA: `BLOCKED`; Lease-Korrektur und unveraenderte Grenzen bestaetigt, aber echter Smoke-Nachweis, Abschlussgates und gueltiges Zeitbudget offen
+- Allgemeines Code-Review: `BLOCK`; Ein-Zeilen-Fix korrekt, keine weitere Codebeanstandung; Block wegen abgelaufener Deadline, fehlgeschlagenem echtem Smoke und offenen Abschlussgates
+- Security: Lease-Micro-Fix `PASS`, Task `BLOCK`; keine neue Sicherheitsluecke oder veraenderte Sicherheitsgrenze, aber erforderliche dynamische Smoke-Evidenz und Abschlussgates fehlen und die Deadline ist abgelaufen
+- Legal: `NOT_APPLICABLE`
+
+### Strukturierter Blocker und manuelle Entscheidung
+
+- **Nicht erfuellte Akzeptanzkriterien:** Vertragskriterien 3 bis 8 beziehungsweise Owner-Erfolgskriterien 3 bis 8; insbesondere kein erfolgreicher echter Turn, keine validierte Planner-Ausgabe, keine dynamische MCP-/Web-/Workspace-/Git-/Credential-Evidenz innerhalb eines echten Turns, keine Abschlussgates und keine drei PASS-Voten
+- **Reproduzierbare Evidenz:** einmaliger Befehl und sanitisiertes Ergebnis wie oben; Fehlerstellen `apps/worker/src/codex-runtime.real-smoke.ts:180` und Cleanup-Versuch bei Zeile 192; Testkoerper ab Zeile 237 nicht erreicht
+- **Betroffener Scope:** lokales Testdatenbank-Setup des opt-in Smoke-Harness und der abgelaufene Task-Vertrag; der Lease-Micro-Fix selbst ist korrekt
+- **Verbrauchter Reparaturdurchlauf:** `0`; Vertragsbudget `0/0`, keine weitere automatische Codekorrektur erlaubt
+- **Verbrauchter Smoke-Aufruf:** `1`; kein Retry
+- **Offene Findings und Zielmeilenstein:** gueltige lokale Testdatenbank-Authentifizierung, erfolgreicher echter Read-only-Smoke und alle nachgelagerten Gates bleiben im aktuellen `CODEX_RUNTIME_ADAPTER_MVP` fail-closed offen
+- **Erforderliche manuelle Entscheidung:** Der Owner muss den blockierten Stand beibehalten oder einen neuen ausdruecklich autorisierten Task mit neuem unveraenderlichem Vertrag und gueltigem Zeitbudget fuer einen weiteren Smoke-Versuch nach Korrektur der lokalen Development-Testdatenbank-Konfiguration eroeffnen. Dieser Task fuehrt weder automatisch einen weiteren Smoke noch eine weitere Codeaenderung aus.
+
+GitHub integration bleibt `NO`, Automatic project execution bleibt `NO`, Production deployment bleibt `DISABLED`, Release level bleibt `DEVELOPMENT_ONLY`. Der exakte Erfolgsstatus `CODEX EXEC RUNTIME ADAPTER MVP BESTANDEN  DEVELOPMENT ONLY` wird nicht vergeben.
