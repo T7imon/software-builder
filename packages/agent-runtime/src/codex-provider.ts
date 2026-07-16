@@ -1,9 +1,16 @@
 import { spawn } from "node:child_process";
-import { lstat, mkdtemp, realpath, rm } from "node:fs/promises";
+import type { Stats } from "node:fs";
+import { lstat, mkdir, mkdtemp, readdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Readable } from "node:stream";
-import { buildCodexExecArguments, type ResolvedCodexCli } from "./codex-cli.js";
+import {
+  buildCodexExecArguments,
+  codexRunAuthFileMatchesReceipt,
+  provisionCodexRunAuth,
+  type CodexRunAuthProvisioningReceipt,
+  type ResolvedCodexCli,
+} from "./codex-cli.js";
 import {
   containsCodexSecretMaterial,
   parseCodexPlannerOutput,
@@ -152,6 +159,9 @@ const childEnvironmentKeys = new Set([
   "USERPROFILE",
   "HOME",
 ]);
+const controlledHomeEnvironmentKeys = new Set(["CODEX_HOME", "HOME", "USERPROFILE"]);
+const runRootPrefix = "builder-codex-run-";
+const maxTempRootEntries = 10_000;
 
 function finiteToken(value: unknown): number | undefined {
   return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : undefined;
@@ -277,78 +287,433 @@ async function drainBounded(stream: AsyncIterable<Uint8Array | string>): Promise
   }
 }
 
-function assertChildEnvironment(request: CodexProviderRequest, environment: NodeJS.ProcessEnv): void {
-  if (
-    environment.CODEX_HOME !== request.builderCodexHome ||
-    typeof environment.HOME !== "string" ||
-    environment.HOME.length === 0 ||
-    environment.USERPROFILE !== environment.HOME
-  ) {
-    throw new CodexProviderError("CODEX_SPAWN_FAILED");
-  }
-  for (const key of Object.keys(environment)) {
-    const allowed = process.platform === "win32"
-      ? [...childEnvironmentKeys].some((candidate) => candidate.toLowerCase() === key.toLowerCase())
-      : childEnvironmentKeys.has(key);
-    if (!allowed) throw new CodexProviderError("CODEX_SPAWN_FAILED");
-  }
-}
-
 function pathWithin(parent: string, child: string): boolean {
   const value = relative(parent, child);
   return value === "" || (value !== ".." && !value.startsWith(`..${sep}`) && !isAbsolute(value));
 }
 
-async function createIsolatedRunHome(request: CodexProviderRequest): Promise<{ home: string; tempRoot: string }> {
-  const tempRoot = await realpath(tmpdir()).catch(() => {
-    throw new CodexProviderError("CODEX_SPAWN_FAILED");
-  });
-  const home = await mkdtemp(join(tempRoot, "builder-codex-run-")).catch(() => {
-    throw new CodexProviderError("CODEX_SPAWN_FAILED");
-  });
+function samePath(left: string, right: string): boolean {
+  return process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
+}
+
+function pathsOverlap(left: string, right: string): boolean {
+  return pathWithin(left, right) || pathWithin(right, left);
+}
+
+interface PhysicalDirectory {
+  readonly canonical: string;
+  readonly info: Stats;
+}
+
+interface DirectoryIdentityReceipt {
+  readonly dev: number;
+  readonly ino: number;
+  readonly mode: number;
+  readonly uid: number;
+  readonly gid: number;
+  readonly birthtimeMs: number;
+}
+
+async function inspectPhysicalDirectory(value: string): Promise<PhysicalDirectory> {
+  let info: Stats;
   try {
-    const [canonicalHome, info] = await Promise.all([realpath(home), lstat(home)]);
-    const protectedPaths = [request.workspacePath, request.repositoryRoot, request.builderCodexHome].map((value) => resolve(value));
+    info = await lstat(value);
+  } catch {
+    throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  }
+  if (!info.isDirectory() || info.isSymbolicLink()) throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  let canonical: string;
+  try {
+    canonical = await realpath(value);
+  } catch {
+    throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  }
+  if (!samePath(canonical, resolve(value))) throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  return { canonical, info };
+}
+
+function directoryIdentityReceipt(info: Stats): DirectoryIdentityReceipt {
+  return {
+    dev: info.dev,
+    ino: info.ino,
+    mode: info.mode,
+    uid: info.uid,
+    gid: info.gid,
+    birthtimeMs: info.birthtimeMs,
+  };
+}
+
+function directoryMatchesReceipt(info: Stats, receipt: DirectoryIdentityReceipt): boolean {
+  return (
+    info.dev === receipt.dev &&
+    info.ino === receipt.ino &&
+    info.mode === receipt.mode &&
+    info.uid === receipt.uid &&
+    info.gid === receipt.gid &&
+    info.birthtimeMs === receipt.birthtimeMs
+  );
+}
+
+interface IsolatedCodexRunHome {
+  readonly root: string;
+  readonly home: string;
+  readonly codexHome: string;
+  readonly tempRoot: string;
+  readonly rootIdentity: DirectoryIdentityReceipt;
+  readonly tempRootIdentity: DirectoryIdentityReceipt;
+}
+
+function isBoundedRunRoot(root: string, tempRoot: string): boolean {
+  const name = basename(root);
+  return (
+    samePath(dirname(root), tempRoot) &&
+    name.startsWith(runRootPrefix) &&
+    name.length > runRootPrefix.length
+  );
+}
+
+function assertRunDirectoryRelationships(
+  runHome: IsolatedCodexRunHome,
+  directories: {
+    readonly tempRoot: string;
+    readonly root: string;
+    readonly home: string;
+    readonly codexHome: string;
+    readonly protectedPaths: readonly string[];
+  },
+): void {
+  if (
+    !samePath(directories.tempRoot, runHome.tempRoot) ||
+    !samePath(directories.root, runHome.root) ||
+    !isBoundedRunRoot(directories.root, directories.tempRoot) ||
+    !samePath(directories.home, join(directories.root, "home")) ||
+    !samePath(directories.codexHome, join(directories.root, "codex-home")) ||
+    samePath(directories.home, directories.codexHome) ||
+    directories.protectedPaths.some((value) => pathsOverlap(value, directories.root))
+  ) {
+    throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  }
+}
+
+async function assertTempRootIdentity(runHome: IsolatedCodexRunHome): Promise<string> {
+  const current = await inspectPhysicalDirectory(runHome.tempRoot);
+  if (!directoryMatchesReceipt(current.info, runHome.tempRootIdentity)) {
+    throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  }
+  return current.canonical;
+}
+
+type OriginalRootState = "MATCH" | "MISSING" | "FOREIGN";
+
+async function inspectOriginalRootState(runHome: IsolatedCodexRunHome): Promise<OriginalRootState> {
+  let info: Stats;
+  try {
+    info = await lstat(runHome.root);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "MISSING";
+    throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  }
+  if (!info.isDirectory() || info.isSymbolicLink()) return "FOREIGN";
+  let canonical: string;
+  try {
+    canonical = await realpath(runHome.root);
+  } catch {
+    throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  }
+  if (!samePath(canonical, resolve(runHome.root))) return "FOREIGN";
+  return directoryMatchesReceipt(info, runHome.rootIdentity) ? "MATCH" : "FOREIGN";
+}
+
+async function findDirectRootIdentityMatches(runHome: IsolatedCodexRunHome): Promise<readonly string[]> {
+  const canonicalTempRoot = await assertTempRootIdentity(runHome);
+  let names: string[];
+  try {
+    names = await readdir(canonicalTempRoot);
+  } catch {
+    throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  }
+  if (names.length > maxTempRootEntries) throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  const matches: string[] = [];
+  for (const name of names) {
+    const candidate = join(canonicalTempRoot, name);
+    let info: Stats;
+    try {
+      info = await lstat(candidate);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw new CodexProviderError("CODEX_SPAWN_FAILED");
+    }
+    if (!info.isDirectory() || info.isSymbolicLink() || !directoryMatchesReceipt(info, runHome.rootIdentity)) {
+      continue;
+    }
+    let canonicalCandidate: string;
+    try {
+      canonicalCandidate = await realpath(candidate);
+    } catch {
+      throw new CodexProviderError("CODEX_SPAWN_FAILED");
+    }
     if (
-      !info.isDirectory() ||
-      info.isSymbolicLink() ||
-      dirname(canonicalHome) !== tempRoot ||
-      !canonicalHome.startsWith(join(tempRoot, "builder-codex-run-")) ||
-      protectedPaths.some((value) => pathWithin(value, canonicalHome) || pathWithin(canonicalHome, value))
+      !samePath(canonicalCandidate, resolve(candidate)) ||
+      !samePath(dirname(canonicalCandidate), canonicalTempRoot)
     ) {
       throw new CodexProviderError("CODEX_SPAWN_FAILED");
     }
-    return { home: canonicalHome, tempRoot };
+    matches.push(canonicalCandidate);
+  }
+  await assertTempRootIdentity(runHome);
+  return matches;
+}
+
+async function assertDeletedRootIdentityAbsent(
+  runHome: IsolatedCodexRunHome,
+  deletedPath: string,
+): Promise<void> {
+  await assertTempRootIdentity(runHome);
+  try {
+    await lstat(deletedPath);
+    throw new CodexProviderError("CODEX_SPAWN_FAILED");
   } catch (error) {
-    if (dirname(home) === tempRoot && home.startsWith(join(tempRoot, "builder-codex-run-"))) {
-      await rm(home, { recursive: true, force: true }).catch(() => undefined);
+    if (error instanceof CodexProviderError) throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new CodexProviderError("CODEX_SPAWN_FAILED");
+    }
+  }
+  if ((await findDirectRootIdentityMatches(runHome)).length !== 0) {
+    throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  }
+}
+
+async function removeVerifiedRootPath(runHome: IsolatedCodexRunHome, target: string): Promise<void> {
+  const canonicalTempRoot = await assertTempRootIdentity(runHome);
+  const current = await inspectPhysicalDirectory(target);
+  if (
+    !samePath(dirname(current.canonical), canonicalTempRoot) ||
+    !directoryMatchesReceipt(current.info, runHome.rootIdentity)
+  ) {
+    throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  }
+  try {
+    await rm(current.canonical, { recursive: true, force: false });
+  } catch {
+    throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  }
+  await assertDeletedRootIdentityAbsent(runHome, current.canonical);
+}
+
+async function removeIsolatedRunHome(runHome: IsolatedCodexRunHome): Promise<void> {
+  if (!isBoundedRunRoot(runHome.root, runHome.tempRoot)) {
+    throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  }
+  await assertTempRootIdentity(runHome);
+  const originalState = await inspectOriginalRootState(runHome);
+  if (originalState === "MATCH") {
+    await removeVerifiedRootPath(runHome, runHome.root);
+    return;
+  }
+  const matches = await findDirectRootIdentityMatches(runHome);
+  if (matches.length !== 1 || samePath(matches[0]!, runHome.root)) {
+    throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  }
+  await removeVerifiedRootPath(runHome, matches[0]!);
+  if (originalState === "FOREIGN") throw new CodexProviderError("CODEX_SPAWN_FAILED");
+}
+
+async function createIsolatedRunHome(request: CodexProviderRequest): Promise<IsolatedCodexRunHome> {
+  const tempDirectory = await inspectPhysicalDirectory(tmpdir());
+  const tempRootIdentity = directoryIdentityReceipt(tempDirectory.info);
+  let root: string;
+  try {
+    root = await mkdtemp(join(tempDirectory.canonical, runRootPrefix));
+  } catch {
+    throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  }
+  let initialRootInfo: Stats;
+  try {
+    initialRootInfo = await lstat(root);
+  } catch {
+    throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  }
+  let runHome: IsolatedCodexRunHome = {
+    root: resolve(root),
+    home: join(resolve(root), "home"),
+    codexHome: join(resolve(root), "codex-home"),
+    tempRoot: tempDirectory.canonical,
+    rootIdentity: directoryIdentityReceipt(initialRootInfo),
+    tempRootIdentity,
+  };
+  try {
+    const initialRoot = await inspectPhysicalDirectory(root);
+    if (!directoryMatchesReceipt(initialRoot.info, runHome.rootIdentity)) {
+      throw new CodexProviderError("CODEX_SPAWN_FAILED");
+    }
+    runHome = {
+      ...runHome,
+      root: initialRoot.canonical,
+      home: join(initialRoot.canonical, "home"),
+      codexHome: join(initialRoot.canonical, "codex-home"),
+    };
+    await Promise.all([mkdir(runHome.home), mkdir(runHome.codexHome)]);
+    const [currentTemp, currentRoot, currentHome, currentCodexHome, ...protectedDirectories] = await Promise.all([
+      inspectPhysicalDirectory(runHome.tempRoot),
+      inspectPhysicalDirectory(runHome.root),
+      inspectPhysicalDirectory(runHome.home),
+      inspectPhysicalDirectory(runHome.codexHome),
+      inspectPhysicalDirectory(request.workspacePath),
+      inspectPhysicalDirectory(request.repositoryRoot),
+      inspectPhysicalDirectory(request.builderCodexHome),
+    ]);
+    if (
+      !directoryMatchesReceipt(currentTemp.info, runHome.tempRootIdentity) ||
+      !directoryMatchesReceipt(currentRoot.info, runHome.rootIdentity)
+    ) {
+      throw new CodexProviderError("CODEX_SPAWN_FAILED");
+    }
+    assertRunDirectoryRelationships(runHome, {
+      tempRoot: currentTemp.canonical,
+      root: currentRoot.canonical,
+      home: currentHome.canonical,
+      codexHome: currentCodexHome.canonical,
+      protectedPaths: protectedDirectories.map((directory) => directory.canonical),
+    });
+    return runHome;
+  } catch (error) {
+    try {
+      await removeIsolatedRunHome(runHome);
+    } catch {
+      throw new CodexProviderError("CODEX_SPAWN_FAILED");
     }
     if (error instanceof CodexProviderError) throw error;
     throw new CodexProviderError("CODEX_SPAWN_FAILED");
   }
 }
 
-async function removeIsolatedRunHome(runHome: { home: string; tempRoot: string }): Promise<void> {
-  try {
-    if (
-      dirname(runHome.home) !== runHome.tempRoot ||
-      !runHome.home.startsWith(join(runHome.tempRoot, "builder-codex-run-"))
-    ) return;
-    const [info, canonicalParent, canonicalHome] = await Promise.all([
-      lstat(runHome.home),
-      realpath(dirname(runHome.home)),
-      realpath(runHome.home),
-    ]);
-    if (
-      !info.isDirectory() ||
-      info.isSymbolicLink() ||
-      canonicalParent !== runHome.tempRoot ||
-      canonicalHome !== runHome.home
-    ) return;
-    await rm(runHome.home, { recursive: true, force: true });
-  } catch {
-    // Cleanup is best effort and never changes the sanitized run outcome.
+function normalizedEnvironmentKey(key: string): string {
+  return process.platform === "win32" ? key.toUpperCase() : key;
+}
+
+function buildRunChildEnvironment(
+  source: NodeJS.ProcessEnv,
+  runHome: IsolatedCodexRunHome,
+): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (controlledHomeEnvironmentKeys.has(normalizedEnvironmentKey(key))) continue;
+    environment[key] = value;
   }
+  environment.CODEX_HOME = runHome.codexHome;
+  environment.HOME = runHome.home;
+  environment.USERPROFILE = runHome.home;
+  return environment;
+}
+
+function assertChildEnvironment(
+  request: CodexProviderRequest,
+  runHome: IsolatedCodexRunHome,
+  environment: NodeJS.ProcessEnv,
+): void {
+  if (
+    environment.CODEX_HOME !== runHome.codexHome ||
+    environment.HOME !== runHome.home ||
+    environment.USERPROFILE !== runHome.home ||
+    samePath(environment.CODEX_HOME, request.builderCodexHome) ||
+    samePath(environment.HOME, request.builderCodexHome) ||
+    samePath(environment.CODEX_HOME, environment.HOME)
+  ) {
+    throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  }
+  const seen = new Set<string>();
+  for (const key of Object.keys(environment)) {
+    const normalized = normalizedEnvironmentKey(key);
+    const allowed = process.platform === "win32"
+      ? [...childEnvironmentKeys].some((candidate) => candidate.toUpperCase() === normalized)
+      : childEnvironmentKeys.has(key);
+    if (!allowed || seen.has(normalized)) throw new CodexProviderError("CODEX_SPAWN_FAILED");
+    seen.add(normalized);
+  }
+}
+
+async function readDirectoryEntries(directory: string): Promise<readonly string[]> {
+  try {
+    return await readdir(directory);
+  } catch {
+    throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  }
+}
+
+async function assertCodexHomeReceipt(
+  codexHome: string,
+  runHome: IsolatedCodexRunHome,
+  receipt: CodexRunAuthProvisioningReceipt,
+): Promise<void> {
+  if (!samePath(codexHome, runHome.codexHome)) throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  const entries = await readDirectoryEntries(codexHome);
+  if (receipt.status === "ABSENT") {
+    if (entries.length !== 0) throw new CodexProviderError("CODEX_SPAWN_FAILED");
+    return;
+  }
+  if (entries.length !== 1 || entries[0] !== "auth.json") throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  if (receipt.status === "PRESENT") {
+    const authPath = join(codexHome, "auth.json");
+    try {
+      const info = await lstat(authPath);
+      if (
+        !info.isFile() ||
+        info.isSymbolicLink() ||
+        info.nlink !== 1
+      ) {
+        throw new CodexProviderError("CODEX_SPAWN_FAILED");
+      }
+      const canonicalAuth = await realpath(authPath);
+      if (
+        !samePath(canonicalAuth, resolve(authPath)) ||
+        !pathWithin(codexHome, canonicalAuth) ||
+        !codexRunAuthFileMatchesReceipt(info, receipt.file)
+      ) {
+        throw new CodexProviderError("CODEX_SPAWN_FAILED");
+      }
+    } catch (error) {
+      if (error instanceof CodexProviderError) throw error;
+      throw new CodexProviderError("CODEX_SPAWN_FAILED");
+    }
+  }
+}
+
+async function assertRunReadyForLaunch(
+  request: CodexProviderRequest,
+  runHome: IsolatedCodexRunHome,
+  receipt: CodexRunAuthProvisioningReceipt,
+): Promise<void> {
+  const [tempDirectory, rootDirectory, homeDirectory, codexDirectory, ...protectedDirectories] = await Promise.all([
+    inspectPhysicalDirectory(runHome.tempRoot),
+    inspectPhysicalDirectory(runHome.root),
+    inspectPhysicalDirectory(runHome.home),
+    inspectPhysicalDirectory(runHome.codexHome),
+    inspectPhysicalDirectory(request.repositoryRoot),
+    inspectPhysicalDirectory(request.workspacePath),
+    inspectPhysicalDirectory(request.builderCodexHome),
+  ]);
+  if (
+    !directoryMatchesReceipt(tempDirectory.info, runHome.tempRootIdentity) ||
+    !directoryMatchesReceipt(rootDirectory.info, runHome.rootIdentity)
+  ) {
+    throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  }
+  assertRunDirectoryRelationships(runHome, {
+    tempRoot: tempDirectory.canonical,
+    root: rootDirectory.canonical,
+    home: homeDirectory.canonical,
+    codexHome: codexDirectory.canonical,
+    protectedPaths: protectedDirectories.map((directory) => directory.canonical),
+  });
+  const rootEntries = [...await readDirectoryEntries(rootDirectory.canonical)].sort();
+  if (rootEntries.length !== 2 || rootEntries[0] !== "codex-home" || rootEntries[1] !== "home") {
+    throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  }
+  if ((await readDirectoryEntries(homeDirectory.canonical)).length !== 0) {
+    throw new CodexProviderError("CODEX_SPAWN_FAILED");
+  }
+  await assertCodexHomeReceipt(codexDirectory.canonical, runHome, receipt);
+  if (signalIsAborted(request.signal)) throw new CodexProviderError("CODEX_CANCELLED");
 }
 
 async function settleBounded(promise: Promise<unknown>, timeoutMs: number): Promise<void> {
@@ -377,6 +742,10 @@ export class CodexExecProvider implements CodexProvider {
   constructor(
     private readonly launcher: CodexProcessLauncher = new NodeCodexProcessLauncher(),
     private readonly now: () => Date = () => new Date(),
+    private readonly provisionRunAuth: (
+      builderCodexHome: string,
+      runCodexHome: string,
+    ) => Promise<CodexRunAuthProvisioningReceipt> = provisionCodexRunAuth,
   ) {}
 
   async execute(request: CodexProviderRequest): Promise<CodexProviderResponse> {
@@ -391,15 +760,14 @@ export class CodexExecProvider implements CodexProvider {
       ...(request.model === undefined ? {} : { model: request.model }),
     });
     const runHome = await createIsolatedRunHome(request);
-    const childEnvironment: NodeJS.ProcessEnv = {
-      ...request.environment,
-      HOME: runHome.home,
-      USERPROFILE: runHome.home,
-    };
     let child: CodexChildProcess;
     try {
       if (signalIsAborted(request.signal)) throw new CodexProviderError("CODEX_CANCELLED");
-      assertChildEnvironment(request, childEnvironment);
+      const authReceipt = await this.provisionRunAuth(request.builderCodexHome, runHome.codexHome);
+      if (signalIsAborted(request.signal)) throw new CodexProviderError("CODEX_CANCELLED");
+      const childEnvironment = buildRunChildEnvironment(request.environment, runHome);
+      assertChildEnvironment(request, runHome, childEnvironment);
+      await assertRunReadyForLaunch(request, runHome, authReceipt);
       child = this.launcher.start({
         executable: process.execPath,
         arguments: [request.cli.binPath, ...args],

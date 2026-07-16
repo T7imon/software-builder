@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
-import { lstat, readFile, readdir, realpath } from "node:fs/promises";
+import { constants, type Stats } from "node:fs";
+import { lstat, open, readFile, readdir, realpath, type FileHandle } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -77,6 +78,10 @@ function assertContained(parent: string, child: string, code: string, message: s
   if (!within(parent, child)) throw new CodexCliConfigurationError(code, message);
 }
 
+function pathsOverlap(left: string, right: string): boolean {
+  return within(left, right) || within(right, left);
+}
+
 async function canonicalDirectory(value: string, code: string, label: string): Promise<string> {
   let info;
   try {
@@ -88,6 +93,110 @@ async function canonicalDirectory(value: string, code: string, label: string): P
   const canonical = await realpath(value);
   if (!samePath(canonical, resolve(value))) throw new CodexCliConfigurationError(code, `${label} must not contain a symlink or junction redirect`);
   return canonical;
+}
+
+interface CodexAuthMetadata {
+  readonly path: string;
+  readonly info: Stats;
+}
+
+export interface CodexRunAuthFileReceipt {
+  readonly dev: number;
+  readonly ino: number;
+  readonly nlink: number;
+  readonly size: number;
+  readonly mode: number;
+  readonly uid: number;
+  readonly gid: number;
+  readonly mtimeMs: number;
+  readonly ctimeMs: number;
+  readonly birthtimeMs: number;
+}
+
+export type CodexRunAuthProvisioningReceipt =
+  | { readonly status: "ABSENT" }
+  | { readonly status: "PRESENT"; readonly file: CodexRunAuthFileReceipt };
+
+function sameFileIdentity(left: Stats, right: Stats): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function sameStableFileMetadata(left: Stats, right: Stats): boolean {
+  return (
+    sameFileIdentity(left, right) &&
+    left.nlink === right.nlink &&
+    left.size === right.size &&
+    left.mode === right.mode &&
+    left.uid === right.uid &&
+    left.gid === right.gid &&
+    left.mtimeMs === right.mtimeMs &&
+    left.ctimeMs === right.ctimeMs &&
+    left.birthtimeMs === right.birthtimeMs
+  );
+}
+
+function codexRunAuthFileReceipt(info: Stats): CodexRunAuthFileReceipt {
+  return {
+    dev: info.dev,
+    ino: info.ino,
+    nlink: info.nlink,
+    size: info.size,
+    mode: info.mode,
+    uid: info.uid,
+    gid: info.gid,
+    mtimeMs: info.mtimeMs,
+    ctimeMs: info.ctimeMs,
+    birthtimeMs: info.birthtimeMs,
+  };
+}
+
+export function codexRunAuthFileMatchesReceipt(info: Stats, receipt: CodexRunAuthFileReceipt): boolean {
+  return (
+    info.dev === receipt.dev &&
+    info.ino === receipt.ino &&
+    info.nlink === receipt.nlink &&
+    info.size === receipt.size &&
+    info.mode === receipt.mode &&
+    info.uid === receipt.uid &&
+    info.gid === receipt.gid &&
+    info.mtimeMs === receipt.mtimeMs &&
+    info.ctimeMs === receipt.ctimeMs &&
+    info.birthtimeMs === receipt.birthtimeMs
+  );
+}
+
+function credentialError(): CodexCliConfigurationError {
+  return new CodexCliConfigurationError(
+    "BUILDER_CODEX_HOME_UNSAFE",
+    "BUILDER_CODEX_HOME credential metadata is unsafe",
+  );
+}
+
+async function inspectCodexAuth(canonicalHome: string): Promise<CodexAuthMetadata | undefined> {
+  const authPath = join(canonicalHome, "auth.json");
+  let info: Stats;
+  try {
+    info = await lstat(authPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw credentialError();
+  }
+  let canonicalAuth: string;
+  try {
+    canonicalAuth = await realpath(authPath);
+  } catch {
+    throw credentialError();
+  }
+  if (
+    !info.isFile() ||
+    info.isSymbolicLink() ||
+    info.nlink !== 1 ||
+    !samePath(canonicalAuth, resolve(authPath)) ||
+    !within(canonicalHome, canonicalAuth)
+  ) {
+    throw credentialError();
+  }
+  return { path: authPath, info };
 }
 
 export async function resolvePinnedCodexCli(repositoryRoot: string): Promise<ResolvedCodexCli> {
@@ -165,8 +274,6 @@ export function buildCodexExecArguments(input: CodexCliArgumentsInput): readonly
     "--disable",
     "browser_use_external",
     "--disable",
-    "browser_use_full_cdp_access",
-    "--disable",
     "in_app_browser",
     "--disable",
     "remote_plugin",
@@ -177,7 +284,9 @@ export function buildCodexExecArguments(input: CodexCliArgumentsInput): readonly
     "--disable",
     "auth_elicitation",
     "--disable",
-    "code_mode_host",
+    "code_mode",
+    "--disable",
+    "code_mode_only",
     "--disable",
     "computer_use",
     "--disable",
@@ -227,9 +336,19 @@ export async function validateBuilderCodexHome(input: CodexHomeValidationInput):
     throw new CodexCliConfigurationError("BUILDER_CODEX_HOME_UNSAFE", "BUILDER_CODEX_HOME must not overlap the repository or target workspace");
   }
   const normalHome = resolve(input.processCodexHome ?? join(input.defaultUserHome ?? homedir(), ".codex"));
-  if (samePath(canonicalHome, normalHome)) throw new CodexCliConfigurationError("BUILDER_CODEX_HOME_UNSAFE", "BUILDER_CODEX_HOME must differ from the Builder process default CODEX_HOME");
+  if (pathsOverlap(canonicalHome, normalHome)) {
+    throw new CodexCliConfigurationError(
+      "BUILDER_CODEX_HOME_UNSAFE",
+      "BUILDER_CODEX_HOME must not overlap the Builder process default CODEX_HOME",
+    );
+  }
   try {
-    if (samePath(canonicalHome, await realpath(normalHome))) throw new CodexCliConfigurationError("BUILDER_CODEX_HOME_UNSAFE", "BUILDER_CODEX_HOME resolves to the Builder process default CODEX_HOME");
+    if (pathsOverlap(canonicalHome, await realpath(normalHome))) {
+      throw new CodexCliConfigurationError(
+        "BUILDER_CODEX_HOME_UNSAFE",
+        "BUILDER_CODEX_HOME resolves into the Builder process default CODEX_HOME",
+      );
+    }
   } catch (error) {
     if (error instanceof CodexCliConfigurationError) throw error;
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new CodexCliConfigurationError("BUILDER_CODEX_HOME_UNSAFE", "Default CODEX_HOME could not be verified", { cause: error });
@@ -248,46 +367,141 @@ export async function validateBuilderCodexHome(input: CodexHomeValidationInput):
       }
     }
   }
-  const authPath = join(canonicalHome, "auth.json");
   try {
-    const authInfo = await lstat(authPath);
-    const canonicalAuth = await realpath(authPath);
-    if (
-      !authInfo.isFile() ||
-      authInfo.isSymbolicLink() ||
-      authInfo.nlink !== 1 ||
-      !samePath(canonicalAuth, resolve(authPath)) ||
-      !within(canonicalHome, canonicalAuth)
-    ) {
-      throw new CodexCliConfigurationError(
-        "BUILDER_CODEX_HOME_UNSAFE",
-        "BUILDER_CODEX_HOME credential metadata is unsafe",
-      );
-    }
+    await inspectCodexAuth(canonicalHome);
   } catch (error) {
     if (error instanceof CodexCliConfigurationError) throw error;
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw new CodexCliConfigurationError(
-        "BUILDER_CODEX_HOME_UNSAFE",
-        "BUILDER_CODEX_HOME credential metadata could not be verified",
-        { cause: error },
-      );
-    }
+    throw credentialError();
   }
   return canonicalHome;
 }
 
 export function buildCodexChildEnvironment(
   source: Readonly<Record<string, string | undefined>>,
-  builderCodexHome: string,
 ): NodeJS.ProcessEnv {
-  const result: NodeJS.ProcessEnv = { CODEX_HOME: builderCodexHome };
+  const result: NodeJS.ProcessEnv = {};
   for (const key of childEnvironmentKeys) {
     const matching = Object.keys(source).find((candidate) => process.platform === "win32" ? candidate.toLowerCase() === key.toLowerCase() : candidate === key);
     const value = matching === undefined ? undefined : source[matching];
     if (value !== undefined && value.length > 0) result[key] = value;
   }
   return result;
+}
+
+export async function provisionCodexRunAuth(
+  builderCodexHome: string,
+  runCodexHome: string,
+): Promise<CodexRunAuthProvisioningReceipt> {
+  const [canonicalBuilderHome, canonicalRunHome] = await Promise.all([
+    canonicalDirectory(builderCodexHome, "BUILDER_CODEX_HOME_UNSAFE", "BUILDER_CODEX_HOME"),
+    canonicalDirectory(runCodexHome, "CODEX_RUN_HOME_UNSAFE", "Codex run home"),
+  ]);
+  if (pathsOverlap(canonicalBuilderHome, canonicalRunHome)) {
+    throw new CodexCliConfigurationError("CODEX_RUN_HOME_UNSAFE", "Codex run home must not overlap the credential home");
+  }
+  const targetPath = join(canonicalRunHome, "auth.json");
+  try {
+    await lstat(targetPath);
+    throw new CodexCliConfigurationError("CODEX_RUN_HOME_UNSAFE", "Codex run credential target must not exist");
+  } catch (error) {
+    if (error instanceof CodexCliConfigurationError) throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new CodexCliConfigurationError("CODEX_RUN_HOME_UNSAFE", "Codex run credential target is unsafe");
+    }
+  }
+  const initial = await inspectCodexAuth(canonicalBuilderHome);
+  if (initial === undefined) return { status: "ABSENT" };
+
+  let source: FileHandle | undefined;
+  let target: FileHandle | undefined;
+  let receipt: CodexRunAuthProvisioningReceipt | undefined;
+  let closeFailed = false;
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  try {
+    source = await open(initial.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const opened = await source.stat();
+    const immediatelyBeforeCopy = await inspectCodexAuth(canonicalBuilderHome);
+    if (
+      immediatelyBeforeCopy === undefined ||
+      !opened.isFile() ||
+      opened.nlink !== 1 ||
+      !Number.isSafeInteger(opened.size) ||
+      opened.size < 0 ||
+      !sameStableFileMetadata(initial.info, opened) ||
+      !sameStableFileMetadata(opened, immediatelyBeforeCopy.info)
+    ) {
+      throw credentialError();
+    }
+
+    target = await open(
+      targetPath,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600,
+    );
+    let position = 0;
+    while (position < opened.size) {
+      const length = Math.min(buffer.byteLength, opened.size - position);
+      const { bytesRead } = await source.read(buffer, 0, length, position);
+      if (bytesRead !== length) throw credentialError();
+      let offset = 0;
+      while (offset < bytesRead) {
+        const { bytesWritten } = await target.write(buffer, offset, bytesRead - offset, position + offset);
+        if (bytesWritten <= 0) throw credentialError();
+        offset += bytesWritten;
+      }
+      position += bytesRead;
+    }
+    await target.sync();
+
+    const [sourceAfterCopy, pathAfterCopy, targetInfo] = await Promise.all([
+      source.stat(),
+      inspectCodexAuth(canonicalBuilderHome),
+      target.stat(),
+    ]);
+    if (
+      pathAfterCopy === undefined ||
+      !sameStableFileMetadata(opened, sourceAfterCopy) ||
+      !sameStableFileMetadata(sourceAfterCopy, pathAfterCopy.info) ||
+      !targetInfo.isFile() ||
+      targetInfo.nlink !== 1 ||
+      targetInfo.size !== opened.size
+    ) {
+      throw credentialError();
+    }
+    receipt = { status: "PRESENT", file: codexRunAuthFileReceipt(targetInfo) };
+  } catch (error) {
+    if (error instanceof CodexCliConfigurationError) throw error;
+    throw credentialError();
+  } finally {
+    buffer.fill(0);
+    const closeResults = await Promise.allSettled([
+      ...(source === undefined ? [] : [source.close()]),
+      ...(target === undefined ? [] : [target.close()]),
+    ]);
+    closeFailed = closeResults.some((result) => result.status === "rejected");
+  }
+  if (closeFailed) {
+    throw new CodexCliConfigurationError("CODEX_RUN_HOME_UNSAFE", "Codex run credential target is unsafe");
+  }
+
+  try {
+    const [targetInfo, canonicalTarget] = await Promise.all([lstat(targetPath), realpath(targetPath)]);
+    if (
+      receipt?.status !== "PRESENT" ||
+      !targetInfo.isFile() ||
+      targetInfo.isSymbolicLink() ||
+      targetInfo.nlink !== 1 ||
+      !samePath(canonicalTarget, resolve(targetPath)) ||
+      !within(canonicalRunHome, canonicalTarget) ||
+      !codexRunAuthFileMatchesReceipt(targetInfo, receipt.file)
+    ) {
+      throw new CodexCliConfigurationError("CODEX_RUN_HOME_UNSAFE", "Codex run credential target is unsafe");
+    }
+  } catch (error) {
+    if (error instanceof CodexCliConfigurationError) throw error;
+    throw new CodexCliConfigurationError("CODEX_RUN_HOME_UNSAFE", "Codex run credential target is unsafe");
+  }
+  return receipt;
 }
 
 export async function assertNoProjectCodexConfiguration(workspacePath: string): Promise<void> {

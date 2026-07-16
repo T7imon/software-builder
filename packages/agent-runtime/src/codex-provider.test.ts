@@ -1,9 +1,23 @@
-import { resolve } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { link, lstat, mkdtemp, mkdir, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CodexExecProvider,
   CodexJsonlAccumulator,
   CodexProviderError,
+  provisionCodexRunAuth,
+  validateBuilderCodexHome,
   type CodexChildProcess,
   type CodexProcessExit,
   type CodexProcessLauncher,
@@ -19,6 +33,23 @@ const plannerOutput = {
   openQuestions: [],
   recommendedNextStep: "Review the synthetic plan.",
 };
+
+const temporaryDirectories: string[] = [];
+let fixtureRoot: string;
+let workspacePath: string;
+let builderCodexHome: string;
+
+beforeEach(async () => {
+  fixtureRoot = await mkdtemp(join(tmpdir(), "builder-codex-provider-test-"));
+  temporaryDirectories.push(fixtureRoot);
+  workspacePath = join(fixtureRoot, "workspace");
+  builderCodexHome = join(fixtureRoot, "credential-home");
+  await Promise.all([mkdir(workspacePath), mkdir(builderCodexHome)]);
+});
+
+afterEach(async () => {
+  await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+});
 
 function lines(...events: unknown[]): string {
   return `${events.map((event) => JSON.stringify(event)).join("\n")}\n`;
@@ -66,9 +97,10 @@ class TestChild implements CodexChildProcess {
 
 class TestLauncher implements CodexProcessLauncher {
   readonly specs: CodexProcessSpec[] = [];
-  constructor(readonly child: TestChild) {}
+  constructor(readonly child: TestChild, private readonly onStart?: (spec: CodexProcessSpec) => void) {}
   start(spec: CodexProcessSpec): CodexChildProcess {
     this.specs.push(spec);
+    this.onStart?.(spec);
     return this.child;
   }
 }
@@ -77,16 +109,21 @@ function request(overrides: Partial<CodexProviderRequest> = {}): CodexProviderRe
   return {
     cli: {
       packageName: "@openai/codex",
-      packageVersion: "0.144.4",
+      packageVersion: "0.132.0",
       packageRoot: resolve("node_modules/@openai/codex"),
       binPath: resolve("node_modules/@openai/codex/bin/codex.js"),
     },
-    workspacePath: resolve("synthetic-workspace"),
+    workspacePath,
     repositoryRoot: resolve("."),
-    builderCodexHome: resolve("synthetic-codex-home"),
+    builderCodexHome,
     outputSchemaPath: resolve("synthetic-output.schema.json"),
     prompt: "synthetic planner prompt",
-    environment: { CODEX_HOME: resolve("synthetic-codex-home"), PATH: "synthetic-path" },
+    environment: {
+      CODEX_HOME: builderCodexHome,
+      HOME: join(fixtureRoot, "normal-home"),
+      USERPROFILE: join(fixtureRoot, "normal-profile"),
+      PATH: "synthetic-path",
+    },
     timeoutMs: 1_000,
     ...overrides,
   };
@@ -115,15 +152,29 @@ describe("CodexExecProvider", () => {
     });
     expect(child.prompt).toBe("synthetic planner prompt");
     expect(launcher.specs).toHaveLength(1);
-    expect(launcher.specs[0]).toMatchObject({
+    const spec = launcher.specs[0]!;
+    expect(spec).toMatchObject({
       executable: process.execPath,
-      workingDirectory: resolve("synthetic-workspace"),
-      environment: { CODEX_HOME: resolve("synthetic-codex-home"), PATH: "synthetic-path" },
+      workingDirectory: workspacePath,
     });
-    expect(launcher.specs[0]!.arguments[0]).toBe(resolve("node_modules/@openai/codex/bin/codex.js"));
-    expect(launcher.specs[0]!.arguments).toContain("--ignore-user-config");
-    expect(launcher.specs[0]!.arguments).toContain("read-only");
-    expect(launcher.specs[0]!.arguments).not.toContain("synthetic planner prompt");
+    expect(spec.environment).toEqual({
+      CODEX_HOME: expect.any(String),
+      HOME: expect.any(String),
+      USERPROFILE: expect.any(String),
+      PATH: "synthetic-path",
+    });
+    expect(spec.environment.CODEX_HOME).not.toBe(builderCodexHome);
+    expect(spec.environment.HOME).not.toBe(join(fixtureRoot, "normal-home"));
+    expect(spec.environment.USERPROFILE).toBe(spec.environment.HOME);
+    expect(spec.environment.CODEX_HOME).not.toBe(spec.environment.HOME);
+    const runRoot = dirname(spec.environment.CODEX_HOME!);
+    expect(dirname(spec.environment.HOME!)).toBe(runRoot);
+    expect(dirname(runRoot)).toBe(await realpath(tmpdir()));
+    expect(spec.arguments[0]).toBe(resolve("node_modules/@openai/codex/bin/codex.js"));
+    expect(spec.arguments).toContain("--ignore-user-config");
+    expect(spec.arguments).toContain("read-only");
+    expect(spec.arguments).not.toContain("synthetic planner prompt");
+    await expect(lstat(runRoot)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it.each([
@@ -132,17 +183,21 @@ describe("CodexExecProvider", () => {
     ["FORBIDDEN_INTEGRATION", { type: "item.started", item: { type: "subagent_call" } }],
   ] as const)("kills and fails closed on a %s event", async (policyEvent, event) => {
     const child = new TestChild(lines(event));
-    const provider = new CodexExecProvider(new TestLauncher(child));
+    const launcher = new TestLauncher(child);
+    const provider = new CodexExecProvider(launcher);
     await expect(provider.execute(request())).rejects.toMatchObject({
       code: "CODEX_SECURITY_POLICY_VIOLATION",
       policyEvent,
     });
     expect(child.killed).toBe(true);
+    await expect(lstat(dirname(launcher.specs[0]!.environment.CODEX_HOME!))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("rejects malformed JSONL and invalid structured output", async () => {
-    const malformed = new CodexExecProvider(new TestLauncher(new TestChild("not-json\n")));
+    const malformedLauncher = new TestLauncher(new TestChild("not-json\n"));
+    const malformed = new CodexExecProvider(malformedLauncher);
     await expect(malformed.execute(request())).rejects.toMatchObject({ code: "CODEX_JSONL_INVALID" });
+    await expect(lstat(dirname(malformedLauncher.specs[0]!.environment.CODEX_HOME!))).rejects.toMatchObject({ code: "ENOENT" });
     const invalidOutput = new CodexExecProvider(
       new TestLauncher(
         new TestChild(lines({ type: "item.completed", item: { type: "agent_message", text: '{"status":"SUCCEEDED"}' } })),
@@ -164,10 +219,12 @@ describe("CodexExecProvider", () => {
 
   it("returns sanitized timeout and cancellation errors and kills the child", async () => {
     const timeoutChild = new TestChild("", { code: null, signal: "SIGTERM" }, true);
+    const timeoutLauncher = new TestLauncher(timeoutChild);
     await expect(
-      new CodexExecProvider(new TestLauncher(timeoutChild)).execute(request({ timeoutMs: 100 })),
+      new CodexExecProvider(timeoutLauncher).execute(request({ timeoutMs: 100 })),
     ).rejects.toMatchObject({ code: "CODEX_TIMEOUT" });
     expect(timeoutChild.killed).toBe(true);
+    await expect(lstat(dirname(timeoutLauncher.specs[0]!.environment.CODEX_HOME!))).rejects.toMatchObject({ code: "ENOENT" });
 
     const controller = new AbortController();
     const cancelledChild = new TestChild("", { code: null, signal: "SIGTERM" }, true);
@@ -179,6 +236,7 @@ describe("CodexExecProvider", () => {
     controller.abort();
     await expect(cancellation).rejects.toMatchObject({ code: "CODEX_CANCELLED" });
     expect(cancelledChild.killed).toBe(true);
+    await expect(lstat(dirname(cancelledLauncher.specs[0]!.environment.CODEX_HOME!))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("does not spawn when cancellation wins before process creation", async () => {
@@ -191,22 +249,310 @@ describe("CodexExecProvider", () => {
     expect(launcher.specs).toHaveLength(0);
   });
 
+  it("uses distinct physical homes for every run and replaces all incoming home variables", async () => {
+    const observedAtStart: boolean[] = [];
+    const specs: CodexProcessSpec[] = [];
+    const observeStart = (spec: CodexProcessSpec): void => {
+      specs.push(spec);
+      observedAtStart.push(
+        existsSync(spec.environment.CODEX_HOME!) &&
+        existsSync(spec.environment.HOME!) &&
+        readdirSync(spec.environment.CODEX_HOME!).length === 0,
+      );
+    };
+    const injectedEnvironment: NodeJS.ProcessEnv = {
+      CODEX_HOME: builderCodexHome,
+      HOME: "must-not-pass-home",
+      USERPROFILE: "must-not-pass-profile",
+      PATH: "synthetic-path",
+      ...(process.platform === "win32"
+        ? { cOdEx_HoMe: "must-not-pass-case", hOmE: "must-not-pass-case", userprofile: "must-not-pass-case" }
+        : {}),
+    };
+    const output = lines({
+      type: "item.completed",
+      item: { type: "agent_message", text: JSON.stringify(plannerOutput) },
+    });
+    await new CodexExecProvider(new TestLauncher(new TestChild(output), observeStart)).execute(
+      request({ environment: injectedEnvironment }),
+    );
+    await new CodexExecProvider(new TestLauncher(new TestChild(output), observeStart)).execute(
+      request({ environment: injectedEnvironment }),
+    );
+
+    expect(observedAtStart).toEqual([true, true]);
+    const first = specs[0]!.environment;
+    const second = specs[1]!.environment;
+    expect(first.CODEX_HOME).not.toBe(second.CODEX_HOME);
+    expect(dirname(first.CODEX_HOME!)).not.toBe(dirname(second.CODEX_HOME!));
+    expect(first.HOME).not.toBe(first.CODEX_HOME);
+    expect(JSON.stringify(first)).not.toContain("must-not-pass");
+    expect(JSON.stringify(second)).not.toContain("must-not-pass");
+    await expect(lstat(dirname(first.CODEX_HOME!))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(dirname(second.CODEX_HOME!))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("copies only synthetic auth into the run home and contains CLI-created system skills", async () => {
+    const syntheticAuth = '{"synthetic":"credential-only"}';
+    await Promise.all([
+      writeFile(join(builderCodexHome, "auth.json"), syntheticAuth, "utf8"),
+      writeFile(join(builderCodexHome, "config.toml"), "synthetic_config = true", "utf8"),
+    ]);
+    await expect(validateBuilderCodexHome({
+      configuredHome: builderCodexHome,
+      repositoryRoot: resolve("."),
+      workspacePath,
+      defaultUserHome: join(fixtureRoot, "normal-user"),
+    })).resolves.toBe(builderCodexHome);
+    const stableEntriesBefore = readdirSync(builderCodexHome).sort();
+    let runRoot: string | undefined;
+    let copiedAuth: string | undefined;
+    let initialRunEntries: string[] | undefined;
+    let initialUserHomeEntries: string[] | undefined;
+    const child = new TestChild(
+      lines({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(plannerOutput) } }),
+    );
+    const launcher = new TestLauncher(child, (spec) => {
+      const codexHome = spec.environment.CODEX_HOME!;
+      runRoot = dirname(codexHome);
+      initialRunEntries = readdirSync(codexHome).sort();
+      initialUserHomeEntries = readdirSync(spec.environment.HOME!).sort();
+      copiedAuth = readFileSync(join(codexHome, "auth.json"), "utf8");
+      mkdirSync(join(codexHome, "skills", ".system"), { recursive: true });
+    });
+
+    await new CodexExecProvider(launcher).execute(request());
+
+    expect(initialRunEntries).toEqual(["auth.json"]);
+    expect(initialUserHomeEntries).toEqual([]);
+    expect(copiedAuth).toBe(syntheticAuth);
+    expect(stableEntriesBefore).toEqual(["auth.json", "config.toml"]);
+    expect(readdirSync(builderCodexHome).sort()).toEqual(stableEntriesBefore);
+    expect(existsSync(join(builderCodexHome, "skills"))).toBe(false);
+    expect(existsSync(join(builderCodexHome, "plugins"))).toBe(false);
+    expect(existsSync(join(builderCodexHome, ".agents"))).toBe(false);
+    await expect(validateBuilderCodexHome({
+      configuredHome: builderCodexHome,
+      repositoryRoot: resolve("."),
+      workspacePath,
+      defaultUserHome: join(fixtureRoot, "normal-user"),
+    })).resolves.toBe(builderCodexHome);
+    expect(runRoot).toBeDefined();
+    await expect(lstat(runRoot!)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects a post-validation hardlink exchange before starting a child", async () => {
+    const authPath = join(builderCodexHome, "auth.json");
+    await writeFile(authPath, '{"synthetic":"initial"}', "utf8");
+    await expect(validateBuilderCodexHome({
+      configuredHome: builderCodexHome,
+      repositoryRoot: resolve("."),
+      workspacePath,
+      defaultUserHome: join(fixtureRoot, "normal-user"),
+    })).resolves.toBe(builderCodexHome);
+    await rm(authPath);
+    const replacement = join(fixtureRoot, "synthetic-replacement.json");
+    await writeFile(replacement, '{"synthetic":"replacement-must-not-leak"}', "utf8");
+    await link(replacement, authPath);
+    const launcher = new TestLauncher(new TestChild(""));
+
+    const error = await new CodexExecProvider(launcher).execute(request()).catch((failure: unknown) => failure);
+
+    expect(error).toEqual(new CodexProviderError("CODEX_SPAWN_FAILED"));
+    expect(JSON.stringify(error)).not.toContain("replacement-must-not-leak");
+    expect(launcher.specs).toHaveLength(0);
+  });
+
+  it("rejects an auth replacement injected after an ABSENT provisioning receipt", async () => {
+    const launcher = new TestLauncher(new TestChild(""));
+    let receiptStatus: string | undefined;
+    let runRoot: string | undefined;
+    const provider = new CodexExecProvider(launcher, undefined, async (credentialHome, runCodexHome) => {
+      const receipt = await provisionCodexRunAuth(credentialHome, runCodexHome);
+      receiptStatus = receipt.status;
+      runRoot = dirname(runCodexHome);
+      await writeFile(join(runCodexHome, "auth.json"), '{"synthetic":"injected-after-absent"}', "utf8");
+      return receipt;
+    });
+
+    await expect(provider.execute(request())).rejects.toEqual(new CodexProviderError("CODEX_SPAWN_FAILED"));
+
+    expect(receiptStatus).toBe("ABSENT");
+    expect(launcher.specs).toHaveLength(0);
+    expect(runRoot).toBeDefined();
+    await expect(lstat(runRoot!)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects an exchanged copied target that no longer matches its PRESENT receipt", async () => {
+    await writeFile(join(builderCodexHome, "auth.json"), '{"synthetic":"copied-target"}', "utf8");
+    const launcher = new TestLauncher(new TestChild(""));
+    let receiptStatus: string | undefined;
+    let runRoot: string | undefined;
+    const provider = new CodexExecProvider(launcher, undefined, async (credentialHome, runCodexHome) => {
+      const receipt = await provisionCodexRunAuth(credentialHome, runCodexHome);
+      receiptStatus = receipt.status;
+      runRoot = dirname(runCodexHome);
+      await rm(join(runCodexHome, "auth.json"));
+      await writeFile(join(runCodexHome, "auth.json"), '{"synthetic":"exchanged-target"}', "utf8");
+      return receipt;
+    });
+
+    await expect(provider.execute(request())).rejects.toEqual(new CodexProviderError("CODEX_SPAWN_FAILED"));
+
+    expect(receiptStatus).toBe("PRESENT");
+    expect(launcher.specs).toHaveLength(0);
+    expect(runRoot).toBeDefined();
+    await expect(lstat(runRoot!)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects a HOME junction in final readiness and cleanup never follows it", async () => {
+    const outsideHome = join(fixtureRoot, "outside-normal-home");
+    await mkdir(outsideHome);
+    await writeFile(join(outsideHome, "marker.txt"), "synthetic-outside-home-marker", "utf8");
+    const launcher = new TestLauncher(new TestChild(""));
+    let runRoot: string | undefined;
+    const provider = new CodexExecProvider(launcher, undefined, async (credentialHome, runCodexHome) => {
+      const receipt = await provisionCodexRunAuth(credentialHome, runCodexHome);
+      runRoot = dirname(runCodexHome);
+      const runUserHome = join(runRoot, "home");
+      await rm(runUserHome, { recursive: true, force: false });
+      await symlink(outsideHome, runUserHome, "junction");
+      return receipt;
+    });
+
+    const error = await provider.execute(request()).catch((failure: unknown) => failure);
+
+    expect(error).toEqual(new CodexProviderError("CODEX_SPAWN_FAILED"));
+    expect(JSON.stringify(error)).not.toContain(outsideHome);
+    expect(launcher.specs).toHaveLength(0);
+    expect(readFileSync(join(outsideHome, "marker.txt"), "utf8")).toBe("synthetic-outside-home-marker");
+    expect(runRoot).toBeDefined();
+    await expect(lstat(runRoot!)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("fails with a sanitized error instead of following a replaced cleanup root", async () => {
+    const outside = join(fixtureRoot, "outside-cleanup-root");
+    await mkdir(outside);
+    await writeFile(join(outside, "marker.txt"), "synthetic-marker", "utf8");
+    let runRoot: string | undefined;
+    const child = new TestChild(
+      lines({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(plannerOutput) } }),
+    );
+    const launcher = new TestLauncher(child, (spec) => {
+      runRoot = dirname(spec.environment.CODEX_HOME!);
+      rmSync(runRoot, { recursive: true, force: true });
+      symlinkSync(outside, runRoot, "junction");
+    });
+    let error: unknown;
+    try {
+      error = await new CodexExecProvider(launcher).execute(request()).catch((failure: unknown) => failure);
+    } finally {
+      if (runRoot !== undefined) await unlink(runRoot).catch(() => undefined);
+    }
+
+    expect(error).toEqual(new CodexProviderError("CODEX_SPAWN_FAILED"));
+    expect(JSON.stringify(error)).not.toContain(outside);
+    expect(readFileSync(join(outside, "marker.txt"), "utf8")).toBe("synthetic-marker");
+  });
+
+  it("finds and removes the original run root after a direct TEMP rename", async () => {
+    await writeFile(join(builderCodexHome, "auth.json"), '{"synthetic":"rename-cleanup"}', "utf8");
+    let originalRoot: string | undefined;
+    let renamedRoot: string | undefined;
+    let copiedAuthWasPresent = false;
+    const child = new TestChild(
+      lines({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(plannerOutput) } }),
+    );
+    const launcher = new TestLauncher(child, (spec) => {
+      originalRoot = dirname(spec.environment.CODEX_HOME!);
+      renamedRoot = join(dirname(originalRoot), `${basename(originalRoot)}-renamed`);
+      copiedAuthWasPresent = existsSync(join(spec.environment.CODEX_HOME!, "auth.json"));
+      renameSync(originalRoot, renamedRoot);
+    });
+    try {
+      await expect(new CodexExecProvider(launcher).execute(request())).resolves.toMatchObject({ output: plannerOutput });
+      expect(originalRoot).toBeDefined();
+      expect(renamedRoot).toBeDefined();
+      expect(copiedAuthWasPresent).toBe(true);
+      await expect(lstat(originalRoot!)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(lstat(renamedRoot!)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      if (renamedRoot !== undefined) await rm(renamedRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("removes a directly renamed original but preserves a physical replacement and fails closed", async () => {
+    let originalRoot: string | undefined;
+    let renamedRoot: string | undefined;
+    const child = new TestChild(
+      lines({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(plannerOutput) } }),
+    );
+    const launcher = new TestLauncher(child, (spec) => {
+      originalRoot = dirname(spec.environment.CODEX_HOME!);
+      renamedRoot = join(dirname(originalRoot), `${basename(originalRoot)}-renamed-with-replacement`);
+      renameSync(originalRoot, renamedRoot);
+      mkdirSync(originalRoot);
+      writeFileSync(join(originalRoot, "replacement-marker.txt"), "synthetic-replacement-marker", "utf8");
+    });
+    try {
+      const error = await new CodexExecProvider(launcher).execute(request()).catch((failure: unknown) => failure);
+      expect(error).toEqual(new CodexProviderError("CODEX_SPAWN_FAILED"));
+      expect(JSON.stringify(error)).not.toContain("replacement-marker");
+      expect(originalRoot).toBeDefined();
+      expect(renamedRoot).toBeDefined();
+      expect(readFileSync(join(originalRoot!, "replacement-marker.txt"), "utf8")).toBe("synthetic-replacement-marker");
+      await expect(lstat(renamedRoot!)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      if (originalRoot !== undefined) await rm(originalRoot, { recursive: true, force: true });
+      if (renamedRoot !== undefined) await rm(renamedRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("never traverses TEMP children to delete a run root moved into the workspace", async () => {
+    let originalRoot: string | undefined;
+    let movedRoot: string | undefined;
+    const child = new TestChild(
+      lines({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(plannerOutput) } }),
+    );
+    const launcher = new TestLauncher(child, (spec) => {
+      originalRoot = dirname(spec.environment.CODEX_HOME!);
+      movedRoot = join(workspacePath, `${basename(originalRoot)}-moved-outside-temp-direct-children`);
+      renameSync(originalRoot, movedRoot);
+      writeFileSync(join(movedRoot, "outside-marker.txt"), "synthetic-moved-marker", "utf8");
+    });
+    try {
+      const error = await new CodexExecProvider(launcher).execute(request()).catch((failure: unknown) => failure);
+      expect(error).toEqual(new CodexProviderError("CODEX_SPAWN_FAILED"));
+      expect(JSON.stringify(error)).not.toContain("moved-outside");
+      expect(originalRoot).toBeDefined();
+      expect(movedRoot).toBeDefined();
+      await expect(lstat(originalRoot!)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(readFileSync(join(movedRoot!, "outside-marker.txt"), "utf8")).toBe("synthetic-moved-marker");
+    } finally {
+      if (movedRoot !== undefined) await rm(movedRoot, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes raw launcher and child failures to closed provider codes", async () => {
+    let failedRunRoot: string | undefined;
     const launcher: CodexProcessLauncher = {
-      start: () => {
+      start: (spec) => {
+        failedRunRoot = dirname(spec.environment.CODEX_HOME!);
         throw new Error("provider raw secret must not escape");
       },
     };
     await expect(new CodexExecProvider(launcher).execute(request())).rejects.toEqual(
       new CodexProviderError("CODEX_SPAWN_FAILED"),
     );
-    const childFailure = new CodexExecProvider(
-      new TestLauncher(
-        new TestChild("", { code: 1, signal: null }, false, "OPENAI_API_KEY=raw-child-secret"),
-      ),
+    expect(failedRunRoot).toBeDefined();
+    await expect(lstat(failedRunRoot!)).rejects.toMatchObject({ code: "ENOENT" });
+    const childFailureLauncher = new TestLauncher(
+      new TestChild("", { code: 1, signal: null }, false, "OPENAI_API_KEY=raw-child-secret"),
     );
+    const childFailure = new CodexExecProvider(childFailureLauncher);
     const error = await childFailure.execute(request()).catch((failure: unknown) => failure);
     expect(error).toEqual(new CodexProviderError("CODEX_PROCESS_FAILED"));
     expect(JSON.stringify(error)).not.toContain("raw-child-secret");
+    await expect(lstat(dirname(childFailureLauncher.specs[0]!.environment.CODEX_HOME!))).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

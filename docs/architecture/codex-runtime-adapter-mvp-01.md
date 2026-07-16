@@ -500,3 +500,86 @@ Weil der echte Smoke nicht bestand, wurden die vertraglich nachgelagerten Worker
 - **Erforderliche manuelle Entscheidung:** Der Owner muss den blockierten Stand beibehalten oder einen neuen ausdruecklich autorisierten Task mit neuem unveraenderlichem Vertrag und gueltigem Zeitbudget fuer einen weiteren Smoke-Versuch nach Korrektur der lokalen Development-Testdatenbank-Konfiguration eroeffnen. Dieser Task fuehrt weder automatisch einen weiteren Smoke noch eine weitere Codeaenderung aus.
 
 GitHub integration bleibt `NO`, Automatic project execution bleibt `NO`, Production deployment bleibt `DISABLED`, Release level bleibt `DEVELOPMENT_ONLY`. Der exakte Erfolgsstatus `CODEX EXEC RUNTIME ADAPTER MVP BESTANDEN  DEVELOPMENT ONLY` wird nicht vergeben.
+
+# CODEX-HOME-RUN-ISOLATION-07
+
+Release level: `DEVELOPMENT_ONLY`
+
+Production deployment: `DISABLED`
+
+## Unveraenderlicher Task-Vertrag
+
+- **Task:** `CODEX-HOME-RUN-ISOLATION-07`
+- **Branch:** `feature/codex-runtime-adapter-mvp`
+- **Ausgangsstand:** `ce1c08e275a30342b4cfd0bb846200ff6807ef5f`
+- **Vertragsbeginn:** 2026-07-16T20:40:12+02:00
+- **Maximales Zeitbudget:** vier Stunden innerhalb dieser Workflow-Ausfuehrung, spaetestens bis 2026-07-17T00:40:12+02:00
+- **Writer-Identitaet:** genau und ausschliesslich `CODEX-HOME-RUN-ISOLATION-07-EXECUTOR`
+- **Reparaturbudget:** hoechstens drei eng begrenzte lokale Korrekturzyklen durch dieselbe Writer-Identitaet (`3/3` verbraucht)
+- **Zulaessige Abschlussstatus:** `PASSED`, `BLOCKED`, `DEFERRED_TO_LATER_GATE`
+- **Freigabestufe:** ausschliesslich `DEVELOPMENT_ONLY`
+- **Exakter Task-Erfolgsstatus:** `CODEX HOME RUN ISOLATION BESTANDEN  DEVELOPMENT ONLY`
+- **Adapter-Gesamtstatus nach Task-Erfolg:** `PENDING REAL SMOKE  DEVELOPMENT ONLY`
+
+Der vom Owner vorgegebene Scope, die Akzeptanzkriterien, erlaubten und verbotenen Dateien, Sicherheitsgrenzen und Gates wurden bei Vertragsfixierung unveraendert uebernommen. Dieser Task autorisierte ausdruecklich keinen echten Smoke, Codex-Child-Prozess oder Modellturn. Der verunreinigte externe `BUILDER_CODEX_HOME` war weder Eingabe noch Abschlussgate und durfte nicht gelesen, bereinigt oder veraendert werden.
+
+### Erlaubte und tatsaechlich geaenderte Anwendungscode- und Testdateien
+
+- `packages/agent-runtime/src/codex-provider.ts`
+- `packages/agent-runtime/src/codex-provider.test.ts`
+- `packages/agent-runtime/src/codex-cli.ts`
+- `packages/agent-runtime/src/codex-cli.test.ts`
+- `apps/worker/src/codex-runtime-context.ts`
+- `apps/worker/src/codex-runtime-context.test.ts`
+
+Die optional erlaubte Datei `apps/worker/src/codex-runtime.real-smoke.ts` wurde nicht durch diese Writer-Identitaet geaendert. Ihre bereits vorhandene fremde Arbeitsbaum-Aenderung sowie die bereits vorhandenen fremden Aenderungen in `packages/agent-runtime/src/codex-schemas.ts` und `packages/agent-runtime/src/codex-schemas.test.ts` blieben unangetastet und ausserhalb des Task-Snapshots.
+
+## Implementierter Lifecycle- und Isolationsvertrag
+
+`BUILDER_CODEX_HOME` ist nur noch die zuvor fail-closed validierte stabile Credential-Quelle. Der Provider erzeugt fuer jeden Lauf direkt unter dem kanonisch und physisch verifizierten System-TEMP einen eindeutigen Root mit getrennten physischen Verzeichnissen fuer `HOME`/`USERPROFILE` und `CODEX_HOME`. Der Child erhaelt ausschliesslich diese Laufpfade; eingehende Varianten von `CODEX_HOME`, `HOME` und `USERPROFILE` werden einschliesslich Windows-Gross-/Kleinschreibung kontrolliert ersetzt. Die bestehende minimale Environment-Allowlist bleibt erhalten.
+
+Eine optionale `auth.json` wird unmittelbar vor der Kopie erneut per `lstat`, `realpath`, `nlink` und FileHandle-Identitaet geprueft. Das Ziel muss fehlen und wird exklusiv und no-follow angelegt. Ein inhaltsfreier `ABSENT`- beziehungsweise `PRESENT`-Receipt bindet das tatsaechlich beschriebene Ziel-Handle ueber stabile Metadaten an den nach dem Schliessen erneut geprueften Zielpfad und an die letzte Readiness-Pruefung unmittelbar vor dem Launcher. `ABSENT` verlangt ein exakt leeres Lauf-`CODEX_HOME`; `PRESENT` erlaubt exakt dieselbe physische `auth.json`. Keine andere Datei, insbesondere keine `config.toml`, Skills, Plugins oder `.agents`, wird kopiert.
+
+Nach Environment-Aufbau und Stringpruefung attestiert die letzte Filesystem-Phase vor dem synchronen `launcher.start` erneut TEMP, Run-Root, HOME, CODEX_HOME, Repository, Workspace und Credential-Home. TEMP- und Root-Identitaet, direkte Parent-Beziehungen, Pfadtrennung, fehlende Schutzpfad-Ueberlappung, exakt die Root-Eintraege `home` und `codex-home`, ein leeres HOME sowie der Auth-Receipt werden fail-closed erzwungen.
+
+Cleanup ist an die bei der Erzeugung erfasste physische TEMP- und Root-Identitaet gebunden. Der Fast Path entfernt nur den unveraenderten Original-Root. Ein direkt unter TEMP umbenanntes Original wird ueber einen strikt begrenzten, no-follow Direct-Child-Scan anhand derselben Directory-Identitaet gefunden und entfernt. Fremde Ersatzpfade, Junctions, Symlinks sowie tiefer oder ausserhalb verschobene Verzeichnisse werden nie verfolgt oder geloescht. Nicht eindeutig beweisbare Zustaende enden sanitisiert fail-closed. Nach der Loeschung werden Pfadabwesenheit und das Fehlen der Root-Identitaet erneut geprueft.
+
+## Synthetische Evidenz und Pflichtgates
+
+- finaler Anwendungscode-Review-Snapshot SHA-256: `a1c4b7362a43e1c130d56914e5b3ee77efa0f94dbda2e864b8e9aa6a05cf1c85`
+- Agent Runtime: `82/82 PASSED` in sechs Testdateien
+- Worker mit `CODEX_REAL_SMOKE_TEST=0`: `42/42 PASSED` in fuenf Testdateien
+- Agent-Runtime-Typecheck, -Lint und -Build: `PASSED`
+- Worker-Typecheck, -Lint und -Build: `PASSED`
+- Root-Typecheck, -Lint und -Build einschliesslich Next.js: `PASSED`
+- `git diff --check`: `PASSED`; ausschliesslich nicht-blockierende LF/CRLF-Hinweise
+- echter Codex-Prozess, Modellturn und Smoke: `0`
+- Zugriff auf echte Credentials oder den externen `BUILDER_CODEX_HOME`: `0`
+
+Die synthetischen Tests beweisen getrennte und pro Lauf unterschiedliche Child-Homes, die ausschliessliche Kopie einer synthetischen `auth.json`, das Ausbleiben von `config.toml`, Skills, Plugins und `.agents`, das sichere Erzeugen von `skills/.system` durch einen Fake-Launcher nur im Lauf-Home, die unveraenderte Validatorgueltigkeit der stabilen Credential-Quelle sowie Cleanup nach Erfolg, Prozessfehler, Timeout, Cancellation, Parser- und Policyfehler. Weitere Negativtests decken Hardlink-Quellaustausch, nach `ABSENT` eingeschleuste Dateien, nach `PRESENT` ausgetauschte Ziele, HOME- und Root-Junctions, direkten Root-Rename, Rename mit fremdem physischem Ersatz und Verschiebung ausserhalb der direkten TEMP-Kinder ab.
+
+## Reparaturdurchlaeufe und finale Reviews
+
+1. Korrekturzyklus `1/3` korrigierte ausschliesslich einen bereits konsumierten Fake-JSONL-Stream im neuen Zwei-Lauf-Test; Produktionscode blieb unveraendert.
+2. Korrekturzyklus `2/3` band Auth-Provenienz ueber den geheimnisfreien `ABSENT`/`PRESENT`-Receipt bis unmittelbar vor den Launcher-Start.
+3. Korrekturzyklus `3/3` ergaenzte die finale physische HOME-/Root-/TEMP-Attestation und das identity-gebundene, begrenzte Cleanup mit Rename-Reconciliation.
+
+Auf demselben finalen Snapshot:
+
+- QA: `PASS - DEVELOPMENT_ONLY`
+- allgemeines Code-Review: `PASS`
+- Security: `PASS - DEVELOPMENT_ONLY`
+- Legal: `NOT_APPLICABLE`
+- offene Findings im aktuellen Task-Scope: `NONE`
+
+Hostile Same-Account-Races nach der letzten Attestation bis zur OS-Dateioperation beziehungsweise zum Spawn sowie beweissichere echte Prozessbaumbeendigung und Verhinderung spaeter Root-Neuerzeugung bleiben fail-closed `REAL_RUNTIME_HARDENING` zugeordnet. Sie sind nicht als bestanden dokumentiert. Ein spaeterer echter Smoke benoetigt einen neuen ausdruecklichen Owner-Task und bleibt fuer den Adapter-Gesamtstatus offen.
+
+## Abschluss
+
+`CODEX HOME RUN ISOLATION BESTANDEN  DEVELOPMENT ONLY`
+
+Der Gesamtstatus des Runtime-Adapter-MVP bleibt:
+
+`PENDING REAL SMOKE  DEVELOPMENT ONLY`
+
+GitHub-Integration und automatische Projektausfuehrung bleiben `NO`; Production deployment bleibt `DISABLED`. Es erfolgten kein Commit, Push, Pull Request, Merge oder Deployment.

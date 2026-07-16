@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@openai/codex": "0.144.4",
+    "@openai/codex": "0.132.0",
     "@software-builder/core": "0.1.0"
   },
   "exports": {

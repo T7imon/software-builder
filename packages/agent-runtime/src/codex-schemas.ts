@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 export const CODEX_CLI_PACKAGE = "@openai/codex" as const;
-export const CODEX_CLI_VERSION = "0.144.4" as const;
+export const CODEX_CLI_VERSION = "0.132.0" as const;
 
 export type CodexPlannerStatus = "SUCCEEDED" | "FAILED";
 
@@ -140,6 +140,16 @@ export function buildCodexPlannerPrompt(input: CodexPlannerPromptInput): { reado
     "- Do not use MCP, plugins, skills, web search, network access, or request credentials/secrets.",
     "- Do not choose another workspace, change the sandbox, request approvals, or propose CLI arguments.",
     "- Return only one JSON object matching the supplied output schema; do not include reasoning or markdown fences.",
+    "",
+    "Planner status semantics:",
+    "- SUCCEEDED means the bounded planning task was completed and a usable plan was produced.",
+    "- Assumptions and open questions are explicitly compatible with SUCCEEDED.",
+    "- Open questions alone must never cause FAILED.",
+    "- Missing later owner decisions must never cause FAILED while a usable plan can be produced.",
+    "- FAILED may be used exclusively when an input strictly required for the bound task cannot be read, the task cannot be performed because it conflicts with the Runtime rules, or no usable plan can be produced at all.",
+    "- For FAILED, summary and recommendedNextStep must state the safe, concrete reason.",
+    "- If PROJECT.md can be read and requirements for the synthetic status endpoint can be produced, the result is SUCCEEDED.",
+    "- Never invent success. An actual fatal blocker remains FAILED.",
     "",
     "Required fields: status, summary, requirements, assumptions, openQuestions, recommendedNextStep.",
     "This is a synthetic local DEVELOPMENT_ONLY component run. It is not release, deployment, legal, or production approval.",

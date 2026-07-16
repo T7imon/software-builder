@@ -61,7 +61,7 @@ const context: CodexRuntimeContext = {
   childEnvironment: { CODEX_HOME: resolve("synthetic-codex-home") },
   cli: {
     packageName: "@openai/codex",
-    packageVersion: "0.144.4",
+    packageVersion: "0.132.0",
     packageRoot: resolve("node_modules/@openai/codex"),
     binPath: resolve("node_modules/@openai/codex/bin/codex.js"),
   },

@@ -5,17 +5,18 @@ GitHub integration enabled: NO
 Automatic project execution: NO
 Production deployment: DISABLED
 Release level: DEVELOPMENT_ONLY
-Milestone status: BLOCKED - DEVELOPMENT ONLY
-Codex Runtime Adapter: CODEX-RUNTIME-SMOKE-LEASE-FIX-03 - BLOCKED - DEVELOPMENT ONLY
-Codex Runtime Adapter predecessor: CODEX-EXEC-RUNTIME-ADAPTER-MVP-02 remains historical BLOCKED; CODEX-RUNTIME-ADAPTER-MVP-01 remains historical BLOCKED and its SDK-only restriction was superseded by the explicit MVP-02 owner decision
+Milestone status: PENDING REAL SMOKE - DEVELOPMENT ONLY
+Codex Runtime Adapter: CODEX-HOME-RUN-ISOLATION-07 - PASSED - DEVELOPMENT ONLY
+Codex Runtime Adapter predecessor: CODEX-RUNTIME-SMOKE-LEASE-FIX-03 remains historical BLOCKED; CODEX-EXEC-RUNTIME-ADAPTER-MVP-02 and CODEX-RUNTIME-ADAPTER-MVP-01 remain historical BLOCKED
 Codex Runtime Adapter authorization: explicit owner-scoped codex exec read-only PLANNER exception in a verified synthetic persistent workspace; no write role, GitHub, automatic project execution, release candidate, deployment or production
-Codex Runtime Adapter implementation: pinned local @openai/codex 0.144.4; verified package bin via process.execPath/spawn shell=false; dedicated BUILDER_CODEX_HOME; ignore-user-config and ignore-rules; ephemeral JSONL; read-only sandbox; approval never; web and inherited integration surfaces disabled; strict structured output; persistent exactly-once and RECOVERY_REQUIRED ledger
+Codex Runtime Adapter implementation: pinned local @openai/codex 0.144.4; verified package bin via process.execPath/spawn shell=false; stable validated BUILDER_CODEX_HOME used only as credential source; unique physical per-run TEMP root with separate HOME and CODEX_HOME; optional receipt-bound auth.json-only provisioning; ignore-user-config and ignore-rules; ephemeral JSONL; read-only sandbox; approval never; web and inherited integration surfaces disabled; strict structured output; persistent exactly-once and RECOVERY_REQUIRED ledger
+Codex Home Run Isolation evidence: final six-file snapshot SHA-256 a1c4b7362a43e1c130d56914e5b3ee77efa0f94dbda2e864b8e9aa6a05cf1c85; Agent Runtime 82/82 and Worker 42/42 with CODEX_REAL_SMOKE_TEST=0; Agent Runtime, Worker and Root Typecheck/Lint/Build; git diff --check; QA, Reviewer and Security PASS; Legal NOT_APPLICABLE
+Codex Home Run Isolation repair budget: 3/3 consumed by the same writer identity; final task-scope findings NONE; no real Codex process, model turn, smoke, real credential read or external BUILDER_CODEX_HOME access
+Codex Home Run Isolation exact status: CODEX HOME RUN ISOLATION BESTANDEN  DEVELOPMENT ONLY
+Codex Runtime Adapter overall status: PENDING REAL SMOKE  DEVELOPMENT ONLY
 Codex Runtime Adapter prior evidence: targeted Runtime 29/29, Provider/JSONL 9/9, final Worker 42/42, Workspace 13/13, Registry/Assignment 9/9, Orchestrators 9/9, serial PostgreSQL 152/152 without skips, final serial Root 389/389, Lint, Typecheck, Build and git diff --check passed for MVP-02
-Codex Runtime Adapter lease micro-fix: the prior failure was exclusively claim lease 300000 above the permitted maximum 120000; CODEX-RUNTIME-SMOKE-LEASE-FIX-03 changed only apps/worker/src/codex-runtime.real-smoke.ts:373 to 120000; independent 300000 test timeout and all runtime/security limits remain unchanged; prior attempt started 0 Codex processes/turns
-Codex Runtime Adapter micro-fix prechecks: Worker Typecheck PASS, Worker Lint PASS, Worker 42/42, Runtime/CLI/Schema 29/29, Provider/JSONL 9/9, disabled harness 1 skip, git diff --check PASS
-Codex Runtime Adapter blocker: the single newly activated smoke invocation failed fail-closed in beforeAll on local test-database authentication before temporary workspace, test body, CountingLauncher or Codex start; Codex processes 0, real turns 0, retries 0; structured Planner, dynamic MCP/Web, workspace/Git and credential evidence NOT_EVALUATED; post-smoke gates not run; immutable deadline exceeded by 4:15:04
-Codex Runtime Adapter task budgets: MVP-02 repair 1/1 remains consumed; lease-fix repair budget 0/0 with no repair performed; activated smoke invocation 1 with no retry; any further smoke requires a new explicit owner task contract
-Codex Runtime Adapter reviews: QA BLOCKED; Reviewer BLOCK; Security lease fix PASS but task BLOCK; Legal NOT_APPLICABLE
+Codex Runtime Adapter historical smoke blocker: the CODEX-RUNTIME-SMOKE-LEASE-FIX-03 invocation failed fail-closed in beforeAll on local test-database authentication before temporary workspace, test body, CountingLauncher or Codex start; Codex processes 0, real turns 0, retries 0; its real-smoke evidence remains NOT_EVALUATED
+Codex Runtime Adapter smoke budget: no smoke was authorized or executed by CODEX-HOME-RUN-ISOLATION-07; any later real smoke requires a new explicit owner task contract and must use the isolated run-home lifecycle
 Codex Runtime Adapter deferred gates: system Managed Policy or equivalent provider isolation, enforced MCP boundary, process-tree termination, real attestation/status, multiprocess reconciliation, Completion-ID hardening, real worker/process identity, credential revocation, provider/release/legal/owner gates remain fail-closed; Production deployment DISABLED
 Cancellation contract: CANCELLATION-CONTRACT-DECISION-01 - APPROVED - DEVELOPMENT ONLY (target architecture; local FakeRuntime pre-start cancellation implemented; no Real-Runtime authorization)
 Cancellation contract normative SHA-256: 58e44fe0a3638d25bdf34dc5aff8551872796486c343904923cb4f41150a4b9f

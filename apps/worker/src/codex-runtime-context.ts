@@ -106,7 +106,7 @@ export class CodexRuntimeContextResolver {
       planningTask: binding.planningTask,
       taskDigest: canonicalAgentOperationDigest("enqueue", claim.task),
       builderCodexHome,
-      childEnvironment: buildCodexChildEnvironment(this.options.environment, builderCodexHome),
+      childEnvironment: buildCodexChildEnvironment(this.options.environment),
       cli,
       outputSchemaPath: codexPlannerOutputSchemaPath,
       timeoutMs,

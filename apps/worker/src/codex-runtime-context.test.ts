@@ -156,8 +156,8 @@ describe("CodexRuntimeContextResolver", () => {
       builderCodexHome: value.codexHome,
       assignmentRole: "PLANNER",
       registryRole: "PLANNER",
-      cli: { packageVersion: "0.144.4" },
-      childEnvironment: { CODEX_HOME: value.codexHome, PATH: "synthetic-path" },
+      cli: { packageVersion: "0.132.0" },
+      childEnvironment: { PATH: "synthetic-path" },
     });
     expect(JSON.stringify(context.childEnvironment)).not.toContain("must-not-pass");
   });

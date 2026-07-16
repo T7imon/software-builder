@@ -406,6 +406,30 @@ describe.skipIf(!enabled)("real Codex Exec PLANNER smoke", () => {
       leaseGeneration: claim.leaseGeneration,
     });
     const status = await runtime.startRun(store.command("startRun"));
+    const diagnosticRun = await codexRepository.load(claim.jobId);
+    if (status.state !== "SUCCEEDED" || status.result?.status !== "SUCCESS") {
+      throw new Error([
+        "CODEX_SMOKE_DIAGNOSTIC",
+        `runtimeState=${status.state}`,
+        `resultStatus=${status.result?.status ?? "NONE"}`,
+        `resultErrorCode=${status.result?.errorCode ?? "NONE"}`,
+        `ledgerState=${diagnosticRun?.state ?? "NONE"}`,
+        `ledgerErrorCode=${diagnosticRun?.errorCode ?? "NONE"}`,
+        `policyEvent=${diagnosticRun?.policyEvent ?? "NONE"}`,
+        `hasThreadId=${Boolean(diagnosticRun?.threadId)}`,
+        `hasModel=${Boolean(diagnosticRun?.model)}`,
+        `outputStatus=${diagnosticRun?.output?.status ?? "NONE"}`,
+        ...(diagnosticRun?.output
+          ? [
+              `outputSummary=${JSON.stringify(diagnosticRun.output.summary)}`,
+              `outputRecommendedNextStep=${JSON.stringify(diagnosticRun.output.recommendedNextStep)}`,
+              `requirementsCount=${diagnosticRun.output.requirements.length}`,
+              `assumptionsCount=${diagnosticRun.output.assumptions.length}`,
+              `openQuestionsCount=${diagnosticRun.output.openQuestions.length}`,
+            ]
+          : []),
+      ].join(";"));
+    }
     expect(status).toMatchObject({ state: "SUCCEEDED", terminal: true, result: { status: "SUCCESS" } });
     if (!status.result) throw new Error("Real Codex smoke returned no structured result");
     await store.persistProgress(status);

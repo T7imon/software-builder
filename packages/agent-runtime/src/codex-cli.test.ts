@@ -8,6 +8,7 @@ import {
   assertNoProjectCodexConfiguration,
   buildCodexChildEnvironment,
   buildCodexExecArguments,
+  provisionCodexRunAuth,
   resolvePinnedCodexCli,
   validateBuilderCodexHome,
 } from "./index.js";
@@ -58,8 +59,6 @@ describe("Codex CLI boundary", () => {
       "--disable",
       "browser_use_external",
       "--disable",
-      "browser_use_full_cdp_access",
-      "--disable",
       "in_app_browser",
       "--disable",
       "remote_plugin",
@@ -70,7 +69,9 @@ describe("Codex CLI boundary", () => {
       "--disable",
       "auth_elicitation",
       "--disable",
-      "code_mode_host",
+      "code_mode",
+      "--disable",
+      "code_mode_only",
       "--disable",
       "computer_use",
       "--disable",
@@ -102,19 +103,18 @@ describe("Codex CLI boundary", () => {
   });
 
   it("passes only the minimal environment allowlist and never propagates secrets", () => {
-    const environment = buildCodexChildEnvironment(
-      {
-        PATH: "synthetic-path",
-        TEMP: "synthetic-temp",
-        OPENAI_API_KEY: "must-not-pass",
-        GH_TOKEN: "must-not-pass",
-        DATABASE_PASSWORD: "must-not-pass",
-        UNRELATED: "must-not-pass",
-      },
-      resolve("dedicated-codex-home"),
-    );
+    const environment = buildCodexChildEnvironment({
+      PATH: "synthetic-path",
+      TEMP: "synthetic-temp",
+      CODEX_HOME: "must-not-pass",
+      HOME: "must-not-pass",
+      USERPROFILE: "must-not-pass",
+      OPENAI_API_KEY: "must-not-pass",
+      GH_TOKEN: "must-not-pass",
+      DATABASE_PASSWORD: "must-not-pass",
+      UNRELATED: "must-not-pass",
+    });
     expect(environment).toEqual({
-      CODEX_HOME: resolve("dedicated-codex-home"),
       PATH: "synthetic-path",
       TEMP: "synthetic-temp",
     });
@@ -162,6 +162,31 @@ describe("Codex CLI boundary", () => {
     ).rejects.toMatchObject({ code: "BUILDER_CODEX_HOME_UNSAFE" });
   });
 
+  it("rejects normal CODEX_HOME overlap in both directions", async () => {
+    const root = await temporaryDirectory();
+    const workspacePath = join(root, "workspace");
+    const normalCodexHome = join(root, "normal-codex-home");
+    const nestedCredentialHome = join(normalCodexHome, "credential-home");
+    const parentCredentialHome = join(root, "parent-credential-home");
+    await Promise.all([
+      mkdir(workspacePath),
+      mkdir(nestedCredentialHome, { recursive: true }),
+      mkdir(parentCredentialHome),
+    ]);
+    await expect(validateBuilderCodexHome({
+      configuredHome: nestedCredentialHome,
+      repositoryRoot,
+      workspacePath,
+      processCodexHome: normalCodexHome,
+    })).rejects.toMatchObject({ code: "BUILDER_CODEX_HOME_UNSAFE" });
+    await expect(validateBuilderCodexHome({
+      configuredHome: parentCredentialHome,
+      repositoryRoot,
+      workspacePath,
+      processCodexHome: join(parentCredentialHome, "nested-normal-codex-home"),
+    })).rejects.toMatchObject({ code: "BUILDER_CODEX_HOME_UNSAFE" });
+  });
+
   it("checks only credential metadata and rejects an auth.json junction escape", async () => {
     const root = await temporaryDirectory();
     const workspacePath = join(root, "workspace");
@@ -184,6 +209,18 @@ describe("Codex CLI boundary", () => {
         defaultUserHome: normalUserHome,
       }),
     ).rejects.toMatchObject({ code: "BUILDER_CODEX_HOME_UNSAFE" });
+  });
+
+  it("requires an absent run target even when the credential source has no auth.json", async () => {
+    const root = await temporaryDirectory();
+    const builderCodexHome = join(root, "credential-home");
+    const runCodexHome = join(root, "run-codex-home");
+    await Promise.all([mkdir(builderCodexHome), mkdir(runCodexHome)]);
+    await writeFile(join(runCodexHome, "auth.json"), '{"synthetic":"preexisting-target"}', "utf8");
+
+    await expect(provisionCodexRunAuth(builderCodexHome, runCodexHome)).rejects.toMatchObject({
+      code: "CODEX_RUN_HOME_UNSAFE",
+    });
   });
 
   it.each([".agents", ".codex", ".codex-plugin"])("rejects project-local %s directories", async (entry) => {
