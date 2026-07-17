@@ -1,4 +1,4 @@
-Current milestone: PROJECT_WORKSPACE_MVP
+Current milestone: CODEX_RUNTIME_ADAPTER_MVP
 Architecture approved: YES
 Implementation enabled: YES
 GitHub integration enabled: NO
@@ -6,6 +6,24 @@ Automatic project execution: NO
 Production deployment: DISABLED
 Release level: DEVELOPMENT_ONLY
 Milestone status: PASSED - DEVELOPMENT ONLY
+Codex Runtime Adapter: CODEX-HOME-RUN-ISOLATION-07 - PASSED - DEVELOPMENT ONLY
+Codex Runtime Adapter closeout: CODEX-RUNTIME-ADAPTER-MVP-FINAL-CLOSEOUT-08 - PASSED - DEVELOPMENT ONLY
+Codex Runtime Adapter predecessor: CODEX-RUNTIME-SMOKE-LEASE-FIX-03 remains historical BLOCKED; CODEX-EXEC-RUNTIME-ADAPTER-MVP-02 and CODEX-RUNTIME-ADAPTER-MVP-01 remain historical BLOCKED
+Codex Runtime Adapter authorization: explicit owner-scoped codex exec read-only PLANNER exception in a verified synthetic persistent workspace; no write role, GitHub, automatic project execution, release candidate, deployment or production
+Codex Runtime Adapter implementation: pinned local @openai/codex 0.132.0; verified package bin via process.execPath/spawn shell=false; stable validated BUILDER_CODEX_HOME used only as credential source; unique physical per-run TEMP root with separate HOME and CODEX_HOME; optional receipt-bound auth.json-only provisioning; ignore-user-config and ignore-rules; ephemeral JSONL; read-only sandbox; approval never; web and inherited integration surfaces disabled; strict structured output; persistent exactly-once and RECOVERY_REQUIRED ledger
+Codex Runtime Adapter CLI enforcement: the application continues to enforce exactly CODEX_CLI_VERSION; active @openai/codex is 0.132.0 as a temporary DEVELOPMENT_ONLY Windows compatibility pin for the confirmed SpawnChild/CreateProcessAsUserW problem in tested newer Windows versions; migration 017 permits only 0.132.0 and 0.144.4 in the historical ledger, and 0.144.4 is not the active CLI
+Codex Home Run Isolation evidence: final six-file snapshot SHA-256 a1c4b7362a43e1c130d56914e5b3ee77efa0f94dbda2e864b8e9aa6a05cf1c85; Agent Runtime 82/82 and Worker 42/42 with CODEX_REAL_SMOKE_TEST=0; Agent Runtime, Worker and Root Typecheck/Lint/Build; git diff --check; QA, Reviewer and Security PASS; Legal NOT_APPLICABLE
+Codex Home Run Isolation repair budget: 3/3 consumed by the same writer identity; final task-scope findings NONE; no real Codex process, model turn, smoke, real credential read or external BUILDER_CODEX_HOME access
+Codex Home Run Isolation exact status: CODEX HOME RUN ISOLATION BESTANDEN  DEVELOPMENT ONLY
+Codex Runtime Adapter overall status: PASSED - DEVELOPMENT ONLY
+Codex Runtime Adapter final real-smoke evidence: SMOKE_EXIT=0; exactly one successful read-only PLANNER Codex process and turn; structured output validated and persisted; workspace and Git state unchanged; no MCP, Web or forbidden-integration policy event
+Codex Runtime Adapter final gates: PostgreSQL integration 152/152 without skips; Agent Runtime 82/82; Worker 42/42; Root tests, Lint, Typecheck, Build and git diff --check passed
+Codex Runtime Adapter prior evidence: targeted Runtime 29/29, Provider/JSONL 9/9, final Worker 42/42, Workspace 13/13, Registry/Assignment 9/9, Orchestrators 9/9, serial PostgreSQL 152/152 without skips, final serial Root 389/389, Lint, Typecheck, Build and git diff --check passed for MVP-02
+Codex Runtime Adapter historical smoke blocker: the CODEX-RUNTIME-SMOKE-LEASE-FIX-03 invocation failed fail-closed in beforeAll on local test-database authentication before temporary workspace, test body, CountingLauncher or Codex start; Codex processes 0, real turns 0, retries 0; its real-smoke evidence remains NOT_EVALUATED
+Codex Runtime Adapter historical pre-start evidence: earlier failed harness invocations ended before any Codex process because local configuration or schema prerequisites were not met; they remain unchanged historical evidence and are not reclassified by the later successful smoke
+Codex Runtime Adapter smoke budget: no smoke was authorized or executed by CODEX-HOME-RUN-ISOLATION-07; any later real smoke requires a new explicit owner task contract and must use the isolated run-home lifecycle
+Codex Runtime Adapter deferred gates: system Managed Policy or equivalent provider isolation, enforced MCP boundary, process-tree termination, real attestation/status, multiprocess reconciliation, Completion-ID hardening, real worker/process identity, credential revocation, provider/release/legal/owner gates remain fail-closed; Production deployment DISABLED
+Codex Runtime Adapter exact status: CODEX EXEC RUNTIME ADAPTER MVP BESTANDEN  DEVELOPMENT ONLY
 Cancellation contract: CANCELLATION-CONTRACT-DECISION-01 - APPROVED - DEVELOPMENT ONLY (target architecture; local FakeRuntime pre-start cancellation implemented; no Real-Runtime authorization)
 Cancellation contract normative SHA-256: 58e44fe0a3638d25bdf34dc5aff8551872796486c343904923cb4f41150a4b9f
 Worker Fake Runtime MVP scope reset: WORKER-FAKE-RUNTIME-MVP-SCOPE-RESET-01 - PASSED_WITH_DEFERRED_HARDENING - DEVELOPMENT ONLY

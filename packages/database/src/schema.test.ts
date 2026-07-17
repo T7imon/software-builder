@@ -93,6 +93,17 @@ describe("Persistence-Schema",()=>{
     expect(sql).toContain("GRANT UPDATE(status,failure_code) ON builder.project_workspaces TO builder_runtime");
     expect(sql).not.toMatch(/project_workspaces[\s\S]{0,500}remote_url|project_workspaces[\s\S]{0,500}absolute_path/i);
   });
+  it("persistiert den Development-only Codex-Exec-Start fail-closed und unveraenderlich",()=>{
+    for(const table of ["codex_exec_job_bindings","codex_exec_runs","codex_exec_audit_events"]) expect(sql).toContain(`CREATE TABLE builder.${table}`);
+    expect(sql).toContain("Codex exec binding requires a persistent PLANNER runtime job");
+    expect(sql).toContain("Codex exec binding requires the exact persistent READY workspace revision");
+    expect(sql).toContain("Codex exec run start binding is immutable");
+    expect(sql).toContain("Codex exec run transition is invalid or terminal");
+    expect(sql).toContain("CODEX_RECOVERY_REQUIRED");
+    expect(sql).toContain("MCP_TOOL_CALL','WEB_SEARCH','FORBIDDEN_INTEGRATION");
+    expect(sql).toContain("codex_exec_audit_events_run_fk");
+    expect(sql).toContain("ALTER TABLE builder.%I FORCE ROW LEVEL SECURITY");
+  });
   it("validiert opaque Capabilities, Ablauf und Signatur",async()=>{
     let now=new Date("2026-01-01T00:00:00Z"); const authority=new HmacCapabilityAuthority(new Uint8Array(32).fill(7),()=>now); const id="00000000-0000-4000-8000-000000000001" as ProjectId;
     const capability=authority.issueProject(id,{subject:"test-actor",actorScope:"TEST",allowedRoles:["TEST"],allowedOperations:["task:read"]},1000); expect((await authority.verifyProject(capability,{audience:"persistence",operation:"task:read"})).projectId).toBe(id);
