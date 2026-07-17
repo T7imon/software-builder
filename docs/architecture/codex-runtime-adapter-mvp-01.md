@@ -583,3 +583,66 @@ Der Gesamtstatus des Runtime-Adapter-MVP bleibt:
 `PENDING REAL SMOKE  DEVELOPMENT ONLY`
 
 GitHub-Integration und automatische Projektausfuehrung bleiben `NO`; Production deployment bleibt `DISABLED`. Es erfolgten kein Commit, Push, Pull Request, Merge oder Deployment.
+
+# CODEX-RUNTIME-ADAPTER-MVP-FINAL-CLOSEOUT-08
+
+Release level: `DEVELOPMENT_ONLY`
+
+Production deployment: `DISABLED`
+
+Dieser Abschnitt ist ausschliesslich der append-only Dokumentations-Closeout der vom Owner als verifiziert vorgegebenen Abschlussfakten. Er schreibt oder loescht keine historischen Task-Ergebnisse oder `BLOCKED`-Abschnitte, fuehrt keinen neuen Smoke oder Modellturn aus und dokumentiert keine neuen Review-Voten.
+
+## Finaler Status
+
+- **Abschlussstatus:** `PASSED - DEVELOPMENT ONLY`
+- **Milestone:** `CODEX_RUNTIME_ADAPTER_MVP` ist `PASSED - DEVELOPMENT ONLY`.
+- **Adapter-Gesamtstatus:** `PASSED - DEVELOPMENT ONLY`
+- **Exakter Status:** `CODEX EXEC RUNTIME ADAPTER MVP BESTANDEN  DEVELOPMENT ONLY`
+
+Die Freigabe ist eine lokale Komponentenfreigabe auf der Stufe `DEVELOPMENT_ONLY`. Sie ist weder eine `RELEASE_CANDIDATE`- noch eine `PRODUCTION`-Freigabe.
+
+## Aktiver CLI-Pin und Run-Isolation
+
+Die aktive lokale CLI-Version ist exakt `@openai/codex 0.132.0`. Dieser Pin ist ein temporaerer `DEVELOPMENT_ONLY`-Windows-Kompatibilitaetspin wegen des bestaetigten `SpawnChild`-/`CreateProcessAsUserW`-Problems der getesteten neueren Windows-Versionen. Die Anwendung erzwingt weiterhin die exakte Uebereinstimmung mit `CODEX_CLI_VERSION`.
+
+Migration 017 erlaubt im historischen Ledger ausschliesslich `0.132.0` und `0.144.4`. `0.144.4` ist dort nur ein historischer Ledger-Wert und nicht die aktive CLI-Version.
+
+`BUILDER_CODEX_HOME` bleibt ausschliesslich Credential-Quelle. Jeder Run verwendet eigene isolierte temporaere `HOME`- und `CODEX_HOME`-Verzeichnisse; der stabile Credential-Quellpfad wird nicht als Child-Home verwendet.
+
+## Erfolgreiche Real-Smoke-Evidenz
+
+Der finale echte Codex-PLANNER-Smoke endete mit `SMOKE_EXIT=0`. Er bewies genau einen erfolgreichen Codex-Prozess und genau einen erfolgreichen read-only `PLANNER`-Turn. Die strukturierte Planner-Ausgabe wurde erfolgreich validiert und persistiert. Workspace und Git-Zustand blieben unveraendert. Es trat kein MCP-, Web- oder `Forbidden Integration`-Policy-Event auf.
+
+## Abschlussgates
+
+- Real-Smoke: `PASSED`, `SMOKE_EXIT=0`, genau ein read-only `PLANNER`-Prozess/Turn
+- Strukturierte Ausgabe und Persistenz: `PASSED`
+- Workspace- und Git-Unveraendertheit: `PASSED`
+- MCP-, Web- und Forbidden-Integration-Policy-Grenze: `PASSED`, kein entsprechendes Event
+- Exakter CLI-Pin und `CODEX_CLI_VERSION`-Enforcement: `PASSED`, aktive Version `0.132.0`
+- Isolierte temporaere Run-Verzeichnisse fuer `HOME` und `CODEX_HOME`: `PASSED`
+- PostgreSQL-Integration: `152/152 PASSED`, keine Skips
+- Agent Runtime: `82/82 PASSED`
+- Worker: `42/42 PASSED`
+- Root-Tests: `PASSED`
+- Lint: `PASSED`
+- Typecheck: `PASSED`
+- Build: `PASSED`
+- `git diff --check`: `PASSED`
+
+## Historische Pre-Start-Fehler
+
+Fruehere fehlgeschlagene Harness-Aufrufe endeten wegen lokaler Konfigurations- oder Schema-Voraussetzungen vor dem Start eines Codex-Prozesses. Sie erzeugten deshalb keinen Codex-Turn und bleiben unveraenderte historische Evidenz. Die frueheren `BLOCKED`-Abschnitte werden weder geloescht noch rueckwirkend umgeschrieben; der spaetere erfolgreiche finale Smoke ist ein eigener Abschlussnachweis.
+
+## Verbleibende DEVELOPMENT_ONLY-Grenzen
+
+`REAL_RUNTIME_HARDENING` und der schreibende Executor bleiben ausdruecklich offen und fail-closed. Der erfolgreiche einzelne read-only `PLANNER`-Smoke autorisiert keine schreibende Real-Runtime, keine allgemeine automatische Agentenausfuehrung und keine Hochstufung ueber `DEVELOPMENT_ONLY` hinaus.
+
+- GitHub-Integration: `NO`
+- Automatic project execution: `NO`
+- Production deployment: `DISABLED`
+- Release level: `DEVELOPMENT_ONLY`
+- `RELEASE_CANDIDATE`: nicht freigegeben
+- `PRODUCTION`: nicht freigegeben
+
+Dieser Closeout erteilt keine Production-, GitHub- oder automatische Projektausfuehrungsfreigabe.
