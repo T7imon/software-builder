@@ -1,8 +1,8 @@
 # Builder Platform V1 User Flows
 
-Status: `OWNER APPROVED FOUNDATION BASELINE - GITHUB AND AUTOMATIC EXECUTION DISABLED`
+Status: `REAL_RUNTIME_HARDENING - READY FOR FIRST BOUNDED TASK - DEVELOPMENT ONLY; GITHUB NO; AUTOMATIC EXECUTION NO; PRODUCTION DISABLED`
 
-The V1 human actor is the sole Platform Owner. Agent roles are workflow participants, not independent authorities. Every flow fails closed on missing, stale, or conflicting evidence.
+The V1 human actor is the sole Platform Owner. Agent roles are workflow participants, not independent authorities. Every flow fails closed on missing, stale, or conflicting evidence. The read-only Codex Runtime Adapter and PLANNER smoke are passed `DEVELOPMENT_ONLY`; the Implementation Orchestrator remains synthetic. These are target flows, not authorization for GitHub, automatic project execution, write-capable real Codex execution, release candidate, deployment, or production.
 
 ## 1. End-to-End Flow
 
@@ -28,24 +28,23 @@ flowchart TD
     X -->|No| WAIT
     X -->|Yes| T[Select exactly one ready task]
     T --> E[Executor implements attempt]
-    E --> D[Seal immutable revision digest]
-    D --> Q[Trusted tests / typecheck / lint / build]
+    E --> PRE[Bounded pre-snapshot editing and checks]
+    PRE --> Q[Trusted tests / typecheck / lint / build on candidate digest]
     Q --> QC{All four quality checks pass?}
-    QC -->|Yes| QA[QA read-only review]
-    QC -->|Yes| RV[Reviewer read-only review]
-    QC -->|Yes| SEC[Security read-only review]
-    QC -->|Yes| LEG[Legal read-only review]
-    QC -->|Repairable and repairs < 3| FIX
-    QC -->|Third repair failed| STOP
+    QC -->|No; iterate within task budget| PRE
+    QC -->|Yes| D[Fix immutable final review snapshot and end write access]
+    D --> QA[QA read-only review]
+    D --> RV[Reviewer read-only review]
+    D --> SEC[Security read-only review]
+    D --> LEG[Legal read-only review]
     QA --> C{All four reviews effective?}
-    QA --> C
     RV --> C
     SEC --> C
     LEG --> C
     C -->|Yes| ACC[Accept and promote exact digest]
-    C -->|Repairable and repairs < 3| FIX[Create next repair attempt]
+    C -->|Repairable and repair unused| FIX[Create sole automatic repair]
     FIX --> E
-    C -->|Third repair failed| STOP[Stop for manual decision]
+    C -->|Repair used or non-repairable| STOP[Structured blocker and manual decision]
     C -->|Legal / critical Security hold| HOLD[Non-waivable hold]
 ```
 
@@ -57,10 +56,11 @@ flowchart TD
 4. A workflow execution contains exactly one task.
 5. A project holds one source-writing lease, shared by Executor and any explicitly assigned QA Writer mode.
 6. A source change invalidates all earlier quality and review evidence.
-7. Infrastructure retry repeats the same attempt; a repair creates a new ordinal and revision.
-8. Repair ordinals are `1..3`; no automatic ordinal `4` exists.
-9. Agents never directly call the control database, GitHub, secret broker, or deployment target.
-10. `BLOCK`, `COUNSEL_REQUIRED`, critical Security, unclassified Security, and unresolved Legal data create fail-closed holds as defined by policy.
+7. Normal bounded editing and check iterations before the first final review snapshot do not consume the automatic repair budget.
+8. Fixing that snapshot, ending write access, and beginning closeout reviews activates the repair limit. Exactly one automatic repair ordinal `1` exists; no automatic ordinal `2` exists.
+9. Infrastructure retry repeats the same attempt; the sole repair creates a new ordinal and revision.
+10. Agents never directly call the control database, GitHub, secret broker, or deployment target.
+11. `BLOCK`, `COUNSEL_REQUIRED`, critical Security, unclassified Security, and unresolved Legal data create fail-closed holds as defined by policy.
 
 ### Owner Authentication and Recovery
 
@@ -236,25 +236,27 @@ As the Orchestrator, I want bounded repairs so that automation cannot loop indef
 
 Acceptance criteria:
 
-- The initial attempt is ordinal `0` and does not consume a repair.
+- Normal bounded editing and check iterations before the first final review snapshot are part of the initial implementation and do not consume a repair.
+- Fixing that snapshot and beginning closeout reviews activates the repair limit.
+- The initial attempt is ordinal `0`; the sole automatic repair is ordinal `1`.
 - A serializable transaction increments the counter and creates exactly one repair ordinal.
 - Duplicate commands return the existing repair attempt.
 - Infrastructure retries retain the current attempt ID and do not consume a repair.
 - Every repair creates a new revision and repeats all eight obligations.
-- After unsuccessful ordinal `3`, no automatic execution can start for that task.
+- After unsuccessful ordinal `1`, no further automatic repair can start for that task.
 
 Trace: FR-016, FR-017, NFR-009, GAC-009.
 
 ### US-013 Make a Manual Decision after Repair Limit
 
-As the owner, I want explicit options after three failed repairs so that the history cannot be reset silently.
+As the owner, I want explicit options after the sole automatic repair fails so that the history cannot be reset silently.
 
 Acceptance criteria:
 
 - The task enters `STOPPED_REPAIR_LIMIT` and creates an owner notification.
 - A manual decision records reason and evidence and cannot reset the existing repair counter.
 - Permitted choices are defined by D-017; none waives Legal, Security, or production holds.
-- New scope becomes a new versioned task rather than an automatic fourth repair.
+- New scope becomes a new versioned task rather than a second automatic repair.
 - Imported manual remediation becomes a new revision and receives all eight obligations.
 
 Trace: FR-017, FR-021, D-017, D-025.
@@ -316,7 +318,7 @@ Trace: FR-028, FR-029, NFR-007, NFR-012, SEC-B-004, LGL-B05.
 | Provider contract or transfer evidence expires | Disable the affected external-processing gate and hold queued work |
 | Writer termination unconfirmed | `CANCEL_STUCK`; no next writer |
 | Revision changes after evidence | Mark all earlier obligations ineffective |
-| Third repair fails | Stop for manual decision; no automatic fourth repair |
+| Sole automatic repair fails | Record a structured blocker and stop for manual decision; no second automatic repair |
 | GitHub settings drift toward publication/production | Hold pushes and reconcile configuration |
 | Production or unknown deployment target | Reject at schema, domain, IAM, and network layers |
 

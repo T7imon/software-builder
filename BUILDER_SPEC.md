@@ -14,9 +14,9 @@ Ein Benutzer beschreibt eine Softwareidee. Die Plattform ueberfuehrt diese Idee 
 4. Die Ergebnisse der Planung sowie der Rechts- und Sicherheitspruefungen werden dokumentiert.
 5. Der Plattformbesitzer erteilt genau eine initiale Projektfreigabe. Vor dieser Freigabe darf weder ein ausfuehrbarer Projektordner angelegt noch Anwendungscode implementiert werden.
 6. Nach der initialen Freigabe erstellt die Plattform einen isolierten Projektordner. Spaeter erstellt sie fuer dieses Projekt ein eigenes GitHub-Repository.
-7. Codex-Agenten implementieren anschliessend jeweils genau eine einzelne Aufgabe.
+7. Erst nach bestandenem `REAL_RUNTIME_HARDENING` und allen fuer die Handlung einschlaegigen Gates duerfen schreibende echte Codex-Agenten jeweils genau eine einzelne Aufgabe implementieren. Der bestandene read-only PLANNER-Pfad allein erteilt diese Freigabe nicht.
 8. QA, Reviewer, Security und Legal pruefen jede implementierte Aenderung, bevor sie als akzeptiert gelten kann.
-9. Schlaegt eine Pruefung fehl, sind pro Aufgabe hoechstens drei automatische Reparaturversuche zulaessig. Danach wird die Aufgabe gestoppt und erfordert eine manuelle Entscheidung.
+9. Nach Fixierung des ersten finalen Review-Snapshots und Beginn der Abschlussreviews ist pro Aufgabe hoechstens ein automatischer Reparaturdurchlauf zulaessig. Normale, zeitlich begrenzte Bearbeitungs- und Pruefiterationen vor diesem Snapshot verbrauchen den Reparaturdurchlauf nicht. Bleibt danach ein Akzeptanzkriterium offen, wird die Aufgabe mit einem strukturierten Blocker gestoppt und erfordert eine manuelle Entscheidung.
 
 ## 3. Umfang von Version 1
 

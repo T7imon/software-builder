@@ -1,8 +1,8 @@
 # Builder Platform V1 Implementation Roadmap
 
-Status: `WORKER_FAKE_RUNTIME_MVP - BLOCKED - DEVELOPMENT ONLY`
+Status: `REAL_RUNTIME_HARDENING - READY FOR FIRST BOUNDED TASK - DEVELOPMENT ONLY`
 
-This roadmap sequences future work. `PROJECT_STATE.md` records the active local `WORKER_FAKE_RUNTIME_MVP` milestone. This scope-reset review changes documentation only and authorizes no application-code change. GitHub, automatic project execution, and production remain disabled.
+This roadmap sequences future work. `PROJECT_STATE.md` records `REAL_RUNTIME_HARDENING` as the current milestone and `COMPLETION-ID-HARDENING-01` as its next bounded task. This reconciliation changes documentation only and authorizes no application-code change. GitHub integration and automatic project execution remain `NO`; Production deployment remains `DISABLED`.
 
 ## 1. Current Position
 
@@ -16,9 +16,13 @@ This roadmap sequences future work. `PROJECT_STATE.md` records the active local 
 - The instruction to fix all named planning problems supersedes the earlier no-login choice. D-020 now uses Windows Hello plus a second independent FIDO2 authenticator.
 - Hardware, provider-contract, conformance, restore, and operational tests remain fail-closed activation evidence. They are not unresolved architecture choices.
 - M-000 planning content: complete and owner-approved.
-- The historical foundation and local persistence work provide the base for the active `WORKER_FAKE_RUNTIME_MVP` component milestone.
-- `WORKER_FAKE_RUNTIME_MVP` is the sole active milestone and is limited to synthetic data, `FakeAgentRuntime`, and one local worker by default.
-- `REAL_RUNTIME_HARDENING` is required, unresolved, and fail closed before real Codex execution, agent-driven GitHub changes, Release Candidate, or Production.
+- `WORKER_FAKE_RUNTIME_MVP` is historically `PASSED_WITH_DEFERRED_HARDENING - DEVELOPMENT ONLY`; its synthetic-data, `FakeAgentRuntime`, and single-local-worker evidence remains preserved.
+- Agent Registry, Agent Assignment, and Planning Orchestrator are `PASSED - DEVELOPMENT ONLY`.
+- Implementation Orchestrator is `PASSED - DEVELOPMENT ONLY` and remains synthetic.
+- Project Workspace is `PASSED - DEVELOPMENT ONLY`.
+- `CODEX_RUNTIME_ADAPTER_MVP` is `PASSED - DEVELOPMENT ONLY`; its real read-only PLANNER smoke completed with `SMOKE_EXIT=0`.
+- These bounded component passes do not establish that roadmap milestones M-001 through M-004 are fully implemented, `RELEASE_CANDIDATE`, or production-ready.
+- `REAL_RUNTIME_HARDENING` is the current mandatory milestone and next implementation focus. It is ready only for its first bounded task and remains not passed and fail closed before general operational `AGENT_RUNTIME=codex`, writing real Codex executors, agent-driven GitHub changes, `RELEASE_CANDIDATE`, or `PRODUCTION`. The completed read-only PLANNER smoke remains a narrow historical exception, not activation evidence.
 
 ## 2. Milestone Rules
 
@@ -33,7 +37,7 @@ This roadmap sequences future work. `PROJECT_STATE.md` records the active local 
 9. Implementation work is exactly one task per workflow and at most one source-writing agent per task.
 10. Read-only QA, Reviewer, Security, and Legal reviews start only after implementation and writer handoff are complete; they may then run in parallel against the same fixed digest.
 11. Reviews may not turn previously passed, unchanged areas into repair scope. New out-of-scope findings become separately scoped successor tasks with an assigned milestone and release stage.
-12. After initial implementation, at most one automatic repair pass is permitted. A remaining failure produces a structured blocker and requires a manual decision; automatic loops are prohibited.
+12. After the first final review snapshot is fixed and closeout reviews begin, at most one automatic repair pass is permitted. Normal bounded editing and check iterations before that snapshot do not consume it. A remaining failure produces a structured blocker and requires a manual decision; automatic loops are prohibited.
 13. Every task records scope, testable acceptance criteria, allowed files or components, a maximum time budget, and an unambiguous final status.
 14. `DEVELOPMENT_ONLY`, `RELEASE_CANDIDATE`, and `PRODUCTION` are separate approval stages. Legal `PASS_WITH_REQUIREMENTS` may permit `DEVELOPMENT_ONLY` when the requirements are assigned to later gates and do not prohibit the current isolated scope. `COUNSEL_REQUIRED` blocks production and the affected external or legal action, but not automatically an unrelated technically isolated implementation.
 15. All deferred gates remain fail closed at their assigned stage. No milestone rule weakens Security, Legal, audit, data, privacy, secret, isolation, or compliance controls.
@@ -207,11 +211,17 @@ Exit criteria:
 
 Requirements: FR-009..012, FR-024, FR-025, FR-029, FR-031; SEC-B-001, B002; LGL-B03, B07; D-008, D-013, D-022, D-029.
 
-### WORKER_FAKE_RUNTIME_MVP - Local Worker and Fake Pipelines
+### WORKER_FAKE_RUNTIME_MVP - Historical Local Worker and Fake Pipelines
 
-Dependencies: approved architecture, persistent local job storage, and explicit `Implementation enabled: YES` for separately contracted development tasks.
+Historical status: `PASSED_WITH_DEFERRED_HARDENING - DEVELOPMENT ONLY`.
 
-Scope:
+Historical predecessor status preserved from the earlier roadmap header: `WORKER_FAKE_RUNTIME_MVP - BLOCKED - DEVELOPMENT ONLY`. The later bounded milestone evidence superseded that scheduling status with the pass above; neither status is reclassified.
+
+This section preserves the completed milestone's scope and evidence. `WORKER_FAKE_RUNTIME_MVP` is no longer current.
+
+Historical dependencies: approved architecture, persistent local job storage, and explicit `Implementation enabled: YES` for separately contracted development tasks.
+
+Historical scope:
 
 - local `AgentRuntime` port and deterministic `FakeAgentRuntime` for success, error, timeout, and confirmed cancellation;
 - persistent job claim, lease, generation, fencing, retry limit, and restart recovery;
@@ -220,38 +230,40 @@ Scope:
 - synthetic data and one local worker by default;
 - local Agent Registry and Fake-Pipeline development may follow through separate tasks.
 
-Exit criteria:
+Historical exit criteria:
 
 - all eleven criteria in `worker-fake-runtime-mvp-scope-reset-01.md` pass on the current stable stand;
 - all current tests, PostgreSQL integration without skips, lint, typecheck, build, and `git diff --check` pass;
 - QA, Reviewer, Security, and Legal DE complete their scoped read-only reviews on the same fixed stand;
 - GitHub remains `NO`, automatic project execution remains `NO`, and Production deployment remains `DISABLED`.
 
-This milestone is only `DEVELOPMENT_ONLY`. It neither satisfies nor waives any Real-Runtime, Release-Candidate, or Production gate.
+This milestone passed only as `DEVELOPMENT_ONLY`. It neither satisfied nor waived any Real-Runtime, Release-Candidate, or Production gate.
 
 ### REAL_RUNTIME_HARDENING - Mandatory Real Runtime Gate
 
-Dependencies: completed local Fake-Pipeline/Registry development and a separately authorized immutable task contract.
+Status: `READY FOR FIRST BOUNDED TASK - DEVELOPMENT ONLY`.
 
-Required unresolved scope:
+Dependencies: completed local Fake-Pipeline/Registry development, `CODEX_RUNTIME_ADAPTER_MVP - PASSED - DEVELOPMENT ONLY`, and a separate immutable task contract for each bounded task.
 
-- real `RuntimeTerminationEvidence` and cryptographic or provider-bound termination attestation;
-- complete `WORKLOAD_NOT_CREATED` attestation from a real external runtime;
-- distributed, multiprocess-capable final reconciliation;
-- actual runtime-status query against Codex;
-- crash handling between external runtime query and Evidence commit;
-- complete AT-15/16/17/19/22 Production evidence;
-- Completion-ID hardening;
-- real worker and process identity;
-- provider and credential revocation.
+The milestone is current but not passed. Its unresolved gates remain fail closed. Work proceeds in the following binding order, exactly one separately contracted task at a time; no task may be combined, reordered, or used to imply activation:
 
-Exit criteria:
+| Order | Bounded task | Required scope | Dependency |
+|---:|---|---|---|
+| 1 | `COMPLETION-ID-HARDENING-01` | Bind every completion identity to the authoritative job, run, claim, generation, and runtime context; stale, duplicate, absent, or mismatched completion identities fail closed. | Milestone dependencies satisfied; separate immutable task contract |
+| 2 | `REAL-WORKER-PROCESS-IDENTITY-01` | Establish real worker and process identity, ownership, lease, and claim-context binding without relying on FakeRuntime identity. | Task 1 passed |
+| 3 | `REAL-RUNTIME-TERMINATION-EVIDENCE-01` | Implement real status and termination evidence, `WORKLOAD_NOT_CREATED` evidence, process-tree termination, and context-bound cancel confirmation; unclear outcomes remain `CANCEL_STUCK` or blocked. | Task 2 passed |
+| 4 | `REAL-RUNTIME-RECONCILIATION-01` | Implement distributed multiprocess final reconciliation, actual runtime-status queries, and crash recovery between external query and evidence commit; stale or out-of-order outcomes fail closed. | Task 3 passed |
+| 5 | `PROVIDER-CREDENTIAL-REVOCATION-01` | Prove attempt-bound provider credential, capability, and mount revocation; missing, stale, or uncertain revocation blocks progression. | Task 4 passed |
+| 6 | `REAL-RUNTIME-HARDENING-CLOSEOUT-01` | Aggregate fixed-snapshot evidence, including AT-15/16/17/19/22 at their assigned gates, and obtain required read-only reviews without enabling any later capability. | Tasks 1 through 5 passed |
 
-- every listed item is evidenced and approved at its assigned gate; no item is inferred from FakeRuntime results;
+Milestone exit criteria:
+
+- all six bounded tasks pass in order on their own immutable contracts and fixed review snapshots;
+- every listed item is evidenced and approved at its assigned gate; no item is inferred from FakeRuntime results or the read-only PLANNER smoke;
 - the approved `CANCELLATION-CONTRACT-DECISION-01` target architecture is fully implemented for the real runtime;
 - Security, Legal, provider, GitHub, release, and explicit owner gates independently pass where applicable.
 
-Status: `REQUIRED - DEFERRED_TO_LATER_GATE - FAIL CLOSED`. Completion is mandatory before `AGENT_RUNTIME=codex`, writing real Codex executors, automatic GitHub changes, `RELEASE_CANDIDATE`, or `PRODUCTION`, but is not alone sufficient to activate any of them.
+Activation boundary: milestone completion is mandatory before general operational `AGENT_RUNTIME=codex`, writing real Codex executors, automatic GitHub changes, `RELEASE_CANDIDATE`, or `PRODUCTION`, but is not alone sufficient to activate any of them. GitHub remains `NO`, automatic project execution remains `NO`, and Production deployment remains `DISABLED`.
 
 ### M-007 Quality, Four Reviews, and Repair Limit
 
@@ -391,7 +403,7 @@ None of these records is a Security or Legal successor review, an architecture a
 | D-005 | `TECHNICAL-DECIDED`: One V1 stack profile: TypeScript, Next.js full-stack web application, PostgreSQL, pnpm, TypeScript compiler, ESLint, Vitest, Playwright, and a production build. Unknown stacks are rejected. | One signed toolchain is simpler to secure, test, and support. | Excludes other languages/frameworks and couples V1 projects to one profile. | Add versioned `StackProfile` adapters and migration templates without changing workflow gates. |
 | D-006 | `TECHNICAL-DECIDED`: Text-only idea input, maximum 20,000 characters, no attachments. Scan in transient memory before persistence; reject or quarantine suspected secrets/customer data without logging raw input. | Small attack surface and clear synthetic-data boundary. | No screenshots, archives, or design attachments. False positives need owner correction. | Add typed attachment profiles later with isolated parsers and separate Legal/Security approval. |
 | D-007 | `TECHNICAL-DECIDED`: Canonical artifacts use versioned JSON Schema; Markdown is a rendered view. Every revision is append-only and SHA-256 content-addressed. | Enables schema validation, stable digests, and human-readable documents. | Schema migrations and dual representation add work. | Add new schema versions and deterministic migrators; retain old renderers for audit. |
-| D-008 | `CONDITIONAL`: Use the pinned server-side TypeScript Codex SDK selected at M-006. Prefer cell-local SDK/CLI with an attempt-bound proxy capability, minimal environment, deny-default tools/egress, 30-minute task timeout, and no unsafe fallback. Exact version and model are recorded per run after conformance testing. | Matches the TypeScript control plane while keeping provider behavior behind an adapter. | SDK/runtime behavior and proxy compatibility remain version-sensitive; automatic execution stays disabled until proven. | Swap SDK/model through `AgentProviderPort`; migrate sessions only when conformance proves compatibility. |
+| D-008 | `SUPERSEDED IN PART, CONDITIONAL`: The historical choice selected a pinned server-side TypeScript Codex SDK at M-006 and preferred a cell-local SDK/CLI with attempt-bound proxy capability, minimal environment, deny-default tools/egress, a 30-minute timeout, no unsafe fallback, and per-run version/model evidence. That choice is retained as decision history. Its current successor treatment records the actually proven `DEVELOPMENT_ONLY` read-only path: the pinned local `codex exec` CLI behind `AgentProviderPort`; any later SDK or model path remains subject to the same hardening and conformance gates. | Preserves the earlier choice while recording the adapter actually proven by the MVP. | CLI, SDK, model, and runtime behavior remain version-sensitive; automatic execution stays disabled until hardening and all activation gates pass. | Swap CLI/SDK/model through `AgentProviderPort`; migrate sessions only when conformance proves compatibility. |
 | D-009 | `CONDITIONAL`: The local Windows host uses QEMU full Linux VMs with Windows Hypervisor Platform acceleration, one disposable differencing disk per attempt, no host share, clipboard, device passthrough, or control-plane route. WSL and ordinary containers are not security fallbacks. | The observed Windows Home edition does not provide the intended Hyper-V management baseline; QEMU/WHPX supplies an exchangeable full-VM boundary. | Heavier and slower than microVMs; WHPX and CPU virtualization must pass a prerequisite test. | `WorkspaceBackend` permits later migration to Hyper-V, Firecracker, cloud microVMs, or another independently reviewed backend. |
 | D-010 | `OWNER-DECIDED, CONDITIONAL`: Use a dedicated private GitHub organization and GitHub App. Repositories are private; Actions, Pages, Releases, Packages, OIDC, environments, deploy keys, and production webhooks are disabled. | Separates Builder projects from personal repositories and indirect production paths. | Additional organization/App administration and provider Legal evidence. | Change provider/account through `GitHubPort`; transfer repositories only through an audited owner action. |
 | D-011 | `TECHNICAL-DECIDED`: Adopt the project, baseline, milestone, task, workflow, attempt, repair, revision, obligation, assessment, hold, and external-operation identities in `data-model.md`; initial ordinal is 0 and the sole automatic repair ordinal is 1. | Removes ambiguity from counters, evidence, and references. | More entities than a simple job table. | Add backward-compatible schema versions and explicit data migrations. |
@@ -414,20 +426,21 @@ None of these records is a Security or Legal successor review, an architecture a
 | D-028 | `OWNER-DECIDED`: Builder V1 is a private internal tool used only by the owner in Germany/EU. It is not sold, offered to customers, used by employees, or used for B2C. Regulated or out-of-scope project ideas still trigger counsel. | Minimizes actors, contracts, and Legal scope for V1. | No collaboration, customer access, or commercial service. | A commercial/multi-user version requires a new product baseline, threat model, Legal review, and architecture milestone. |
 | D-029 | `OWNER-DECIDED, CONDITIONAL`: Project code may reach OpenAI/Codex only after a product-specific provider gate verifies contract/DPA, subprocessors, transfers, retention and feature behavior. Use EU processing and ZDR/MAM where the selected Codex path supports them, disable training/feedback opt-in, and send only minimized synthetic project context. | Enables the core Codex feature with the strongest available controls. | EU/ZDR availability may exclude SDK features; provider terms and behavior can change. | Swap provider/product through `AgentProviderPort`; expiry immediately disables dispatch. |
 | D-030 | `TECHNICAL-DECIDED`: German is the primary UI language; stable internal IDs and schemas remain English. Target WCAG 2.2 AA, latest two stable Edge and Chrome versions, desktop width 1280px and responsive usability down to 768px. No native mobile app. | Fits the owner and local Windows use while retaining accessible web design. | Firefox/Safari and full mobile workflows are not release targets. | Add localization catalogs, browsers, and viewports as versioned support profiles. |
-| D-031 | `TECHNICAL-DECIDED`: Run trusted quality checks after implementation and writer handoff. If the revision remains eligible, run QA, Reviewer, Security, and Legal in parallel on the same read-only digest. Any in-scope source, manifest, policy, or material evidence change invalidates affected results. Reviews do not reopen passed unchanged areas; new out-of-scope findings become successor tasks. | Preserves independence and freshness while bounding repair scope. | Parallel reviews consume resources and may produce separately tracked findings needing reconciliation. | Add staged review policies later; digest binding and no self-review remain invariant. |
+| D-031 | `TECHNICAL-DECIDED`: After implementation, run trusted quality checks on the candidate digest before final writer handoff. Once all four checks pass, fix the immutable final review snapshot, end write access, and run QA, Reviewer, Security, and Legal in parallel on that same read-only digest. Any in-scope source, manifest, policy, or material evidence change invalidates affected results. Reviews do not reopen passed unchanged areas; new out-of-scope findings become successor tasks. | Preserves independence and freshness while bounding repair scope. | Parallel reviews consume resources and may produce separately tracked findings needing reconciliation. | Add staged review policies later; digest binding and no self-review remain invariant. |
 | D-032 | `TECHNICAL-DECIDED`: Planning `BLOCK`, `COUNSEL_REQUIRED`, critical/unclassified Security, or unresolved evidence prevents the approval or action whose scope it affects. `COUNSEL_REQUIRED` always blocks production and the affected external or legal action; Security `BLOCK` blocks a development milestone when it concerns that milestone's scope or binding gate. Only scoped `DEVELOPMENT_ONLY` implementation, read-only analysis, counsel work, or narrowly authorized remediation may continue, and all later release gates remain fail closed. | Preserves binding holds without treating unrelated isolated development as production or publication. | Scope classification must be explicit and audited. | Add versioned scoped-remediation policies only after Security/Legal approval; no owner waiver for binding holds. |
 
 ## 8. Remaining Gate Order
 
-1. Continue only local Agent Registry and Fake-Pipeline work through separately contracted `DEVELOPMENT_ONLY` tasks after `WORKER_FAKE_RUNTIME_MVP` passes; this documentation review implements no code.
-2. Complete `REAL_RUNTIME_HARDENING` before any real Runtime/Codex activation or agent-driven GitHub change. Its deferred items remain unresolved and fail closed.
-3. Provider-specific OpenAI, GitHub, backup, timestamp, and Object-Lock evidence is required before those separate external-processing gates can become `YES`; a failed or missing check leaves that capability disabled.
-4. Hardware, VM, SDK, restore, authorization, authentication, and hostile-child conformance tests remain milestone acceptance evidence and fail closed without reopening the selected architecture unless an adapter proves infeasible.
-5. GitHub, automatic execution, external publication, Release Candidate, and production remain disabled until all of their own explicit technical, Security, Legal, provider, and owner gates pass.
+1. Preserve the passed `DEVELOPMENT_ONLY` evidence for Worker Fake Runtime, Registry, Assignment, both Orchestrators, Project Workspace, and Codex Runtime Adapter; none is a release or production approval.
+2. Execute the six `REAL_RUNTIME_HARDENING` tasks in their binding order, starting with `COMPLETION-ID-HARDENING-01`, under separate immutable contracts.
+3. Complete `REAL_RUNTIME_HARDENING` before general operational `AGENT_RUNTIME=codex`, writing real Codex executors, or agent-driven GitHub changes. The completed read-only PLANNER smoke does not satisfy those gates.
+4. Provider-specific OpenAI, GitHub, backup, timestamp, and Object-Lock evidence is required before those separate external-processing gates can become `YES`; a failed or missing check leaves that capability disabled.
+5. Hardware, VM, runtime, restore, authorization, authentication, and hostile-child conformance tests remain milestone acceptance evidence and fail closed without reopening the selected architecture unless an adapter proves infeasible.
+6. GitHub, automatic execution, external publication, `RELEASE_CANDIDATE`, and `PRODUCTION` remain disabled until all of their own explicit technical, Security, Legal, provider, and owner gates pass. Production deployment remains `DISABLED` for Builder V1.
 
-## 9. Architecture Approval Checklist
+## 9. Architecture Approval History and Current Reconciliation
 
-- [x] Owner recorded `Architecture approved: YES` and `Implementation enabled: YES`; `WORKER_FAKE_RUNTIME_MVP` is the sole active local development milestone.
+- [x] At the architecture-approval snapshot, the Owner recorded `Architecture approved: YES` and `Implementation enabled: YES`; `WORKER_FAKE_RUNTIME_MVP` later passed as a bounded `DEVELOPMENT_ONLY` milestone.
 - [x] All D-001..D-032 have a documented MVP treatment, reason, disadvantage, and migration path.
 - [x] D-020 specifies phishing-resistant WebAuthn, two authenticators, short sessions, CSRF controls, and fresh high-risk reauthentication.
 - [x] QEMU/WHPX, DPAPI/PIV recovery, exact audit-anchor, and exact project-authorization designs are documented; their conformance tests remain milestone gates.
@@ -435,5 +448,5 @@ None of these records is a Security or Legal successor review, an architecture a
 - [x] Security successor verdict is `ACCEPTED_WITH_IMPLEMENTATION_GATES`.
 - [x] Legal successor verdict is `PASS_WITH_REQUIREMENTS`; M-000 is accepted and later evidence gates are assigned.
 - [x] The eight documents pass cross-reference and terminology checks.
-- [x] `PROJECT_STATE.md` records `WORKER_FAKE_RUNTIME_MVP`; GitHub and automatic execution remain `NO`, production remains `DISABLED`.
+- [x] `PROJECT_STATE.md` now records `REAL_RUNTIME_HARDENING` and next task `COMPLETION-ID-HARDENING-01`; GitHub and automatic execution remain `NO`, Production deployment remains `DISABLED`.
 - [x] This review changes documentation only and does not implement application code.

@@ -1,6 +1,6 @@
 # Builder Platform V1 Requirements
 
-Status: `OWNER APPROVED - FOUNDATION ACTIVE`
+Status: `REAL_RUNTIME_HARDENING - READY FOR FIRST BOUNDED TASK - DEVELOPMENT ONLY`
 
 Authoritative inputs:
 
@@ -14,14 +14,17 @@ Current authoritative gates:
 
 | Gate | Value |
 |---|---|
-| Current milestone | `FOUNDATION` |
+| Current milestone | `REAL_RUNTIME_HARDENING` |
+| Milestone status | `READY FOR FIRST BOUNDED TASK - DEVELOPMENT ONLY` |
+| Next bounded task | `COMPLETION-ID-HARDENING-01` |
+| Codex Runtime Adapter | `PASSED - DEVELOPMENT ONLY`; read-only PLANNER smoke `SMOKE_EXIT=0` |
 | Architecture approved | `YES` |
-| Implementation enabled | `YES` |
+| Implementation enabled | `YES` - bounded `DEVELOPMENT_ONLY` tasks only |
 | GitHub integration enabled | `NO` |
 | Automatic project execution | `NO` |
 | Production deployment | `DISABLED` |
 
-This document does not itself execute or authorize a code change. `FOUNDATION` work requires a separate one-task implementation workflow. Workspace creation, GitHub integration, automatic project execution, and production remain unavailable until their own gates permit them.
+This document does not itself execute or authorize a code change. Each `REAL_RUNTIME_HARDENING` task requires a separate immutable one-task contract; the first is `COMPLETION-ID-HARDENING-01`. Agent Registry, Agent Assignment, Planning Orchestrator, synthetic Implementation Orchestrator, Project Workspace, and the read-only Codex Runtime Adapter have bounded `DEVELOPMENT_ONLY` passes. Those component results do not establish complete implementation or production readiness of M-001 through M-004. GitHub integration and automatic project execution remain `NO`; Production deployment remains `DISABLED` for Builder V1.
 
 ## 1. Product Definition
 
@@ -29,7 +32,7 @@ The Builder Platform converts one owner's software idea into a controlled projec
 
 V1 supports only full-stack web applications containing a web frontend, server-side logic, and project-specific persistence.
 
-Every changed revision must pass tests, typecheck, lint, build, QA review, Reviewer review, Security review, and Legal review. An initial implementation may be followed by no more than three automatic repair attempts. Legal and critical-security holds override all earlier approvals.
+Every changed revision must pass tests, typecheck, lint, build, QA review, Reviewer review, Security review, and Legal review. Once the first final review snapshot is fixed and closeout reviews begin, an initial implementation may be followed by no more than one automatic repair pass. Normal bounded editing and check iterations before that snapshot do not consume the repair. Legal and critical-security holds override all earlier approvals.
 
 ## 2. Actors
 
@@ -77,8 +80,8 @@ Service identities are required for separation of duties and do not create a sec
 | FR-013 | P0 | Tests, typecheck, lint, and build run after every initial implementation and repair, with immutable trusted evidence. |
 | FR-014 | P0 | QA, Reviewer, Security, and Legal review every changed revision. |
 | FR-015 | P0 | A revision is accepted only when all four quality checks and all four reviews pass for the same immutable digest, or the workflow records an explicit stop. |
-| FR-016 | P0 | A failed task receives no more than three automatic repair attempts after its initial implementation. |
-| FR-017 | P0 | After the third unsuccessful repair, the task stops and requires a documented manual decision; no counter reset creates a fourth repair. |
+| FR-016 | P0 | After the first final review snapshot is fixed and closeout reviews begin, a failed task receives no more than one automatic repair pass. Pre-snapshot editing and check iterations do not consume it. |
+| FR-017 | P0 | After the sole unsuccessful automatic repair, the task stops with a structured blocker and requires a documented manual decision; no counter reset creates a second automatic repair. |
 | FR-018 | P0 | Legal status accepts exactly `PASS`, `PASS_WITH_REQUIREMENTS`, `BLOCK`, or `COUNSEL_REQUIRED`; missing, stale, conflicting, or unknown data fails closed. |
 | FR-019 | P0 | `PASS_WITH_REQUIREMENTS` is effective only after every requirement is verified; `BLOCK` stops continuation and publication; `COUNSEL_REQUIRED` stops publication and, conservatively, automated continuation until successor Legal assessment. |
 | FR-020 | P0 | Any unresolved critical or unclassified security finding stops publication; clearing it requires remediation evidence and repeat Security review of the resulting digest. |
@@ -88,7 +91,7 @@ Service identities are required for separation of duties and do not create a sec
 | FR-024 | P0 | Real customer data is prohibited in ideas, attachments, repositories, fixtures, workspaces, prompts, tests, evidence, reviews, and logs; suspected content is rejected or quarantined. |
 | FR-025 | P0 | Secret values never enter files, prompts, queue messages, evidence, source control, or logs; agents never receive production credentials. |
 | FR-026 | P0 | V1 provides no automatic production publication, production deployment, direct production mutation, production credential, or indirect CI/OIDC production route. |
-| FR-027 | P0 | Only one milestone is active per project. During M-000 the conservative lock remains platform-global; the future runtime also has a platform-global emergency stop. |
+| FR-027 | P0 | Only one milestone is active per project. During M-000 the conservative lock remains platform-global; the hardened real runtime must retain a platform-global emergency stop. |
 | FR-028 | P0 | Planning, approvals, transitions, task attempts, repair counters, quality, reviews, holds, external operations, and manual decisions are attributable and auditable. |
 | FR-029 | P0 | Project data, state, files, jobs, caches, contexts, credentials, evidence, logs, backups, and repositories are organizationally and technically isolated. |
 | FR-030 | P0 | While the Builder remains `PLANNING` with architecture and implementation disabled, no application code is implemented or modified. |
@@ -96,7 +99,7 @@ Service identities are required for separation of duties and do not create a sec
 
 ## 5. Reconciled Security Requirements
 
-These requirements close design gaps identified by the Security review. They are normative; implementation evidence remains future milestone work.
+These requirements close design gaps identified by the Security review. They are normative. Existing component evidence is bounded to `DEVELOPMENT_ONLY`; all unproven runtime, release, and production evidence remains assigned to later fail-closed gates.
 
 | ID | Requirement |
 |---|---|
@@ -139,7 +142,7 @@ Legal successor status is `PASS_WITH_REQUIREMENTS` for the owner-approved V1 arc
 | NFR-006 | All examples, fixtures, automated tests, and demonstrations use synthetic data only. |
 | NFR-007 | 100% of gate-relevant transitions record actor, project/task scope, previous/new state, reason, policy version, time, and evidence references. |
 | NFR-008 | Missing, malformed, stale, conflicting, unavailable, or unknown authorization, quality, Legal, Security, or evidence data denies progression. |
-| NFR-009 | Duplicate delivery, concurrent commands, restart, rollback, or recovery cannot cause a fourth automatic repair. |
+| NFR-009 | Duplicate delivery, concurrent commands, restart, rollback, or recovery cannot create repair ordinal `2` or otherwise cause a second automatic repair. |
 | NFR-010 | Every implementation and repair has immutable trusted evidence for four checks and four reviews bound to the exact revision digest. |
 | NFR-011 | Disabled capabilities remain unreachable at command acceptance, claim, dispatch, external operation, webhook, retry, and reconciliation. |
 | NFR-012 | Every accepted task traces to its planning baseline, task version, attempts, manifests, evidence, four reviews, holds, and final revision. |
@@ -171,7 +174,7 @@ Legal successor status is `PASS_WITH_REQUIREMENTS` for the owner-approved V1 arc
 | GAC-006 | Unauthorized role writes and QA self-review are denied. |
 | GAC-007 | Tests, typecheck, lint, and build pass with trusted evidence before acceptance. |
 | GAC-008 | The same revision digest has current QA, Reviewer, Security, and Legal decisions. |
-| GAC-009 | A fourth repair cannot start under concurrency, duplicate, crash, restore, or manual-decision scenarios. |
+| GAC-009 | A second automatic repair cannot start under concurrency, duplicate, crash, restore, or manual-decision scenarios. |
 | GAC-010 | Only the four Legal statuses are accepted and their exact requirement/hold semantics are enforced. |
 | GAC-011 | `COUNSEL_REQUIRED` and `BLOCK` create the documented non-waivable holds. |
 | GAC-012 | Critical and unclassified Security findings prevent publication until verified closure. |
@@ -194,13 +197,13 @@ Legal successor status is `PASS_WITH_REQUIREMENTS` for the owner-approved V1 arc
 - Production credentials, routes, environments, OIDC trusts, or repository secrets.
 - Real customer data.
 - Owner waiver of Legal or critical-security stops.
-- A fourth automatic repair.
+- A second automatic repair.
 - Application-source writes by Security, Legal, or Reviewer.
 
 ## 10. Working Assumptions
 
 1. Builder architecture approval and each generated project's initial approval are different gates.
-2. The initial implementation is ordinal `0`; repairs are ordinals `1`, `2`, and `3`.
+2. The initial implementation is ordinal `0`; the sole automatic repair is ordinal `1`. Normal bounded editing and check iterations before the first final review snapshot are not repairs.
 3. Every source change creates a new digest and all eight obligations anew.
 4. Planning artifacts may exist before approval, but an executable generated-project directory may not.
 5. Ambiguous distribution is publication and is denied until classified.
