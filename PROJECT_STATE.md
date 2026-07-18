@@ -8,7 +8,8 @@ Release level: DEVELOPMENT_ONLY
 Milestone status: IN PROGRESS - DEVELOPMENT ONLY
 Completion ID Hardening predecessor: COMPLETION-ID-HARDENING-01 - SCOPE_EXPANSION_REQUIRED - DEVELOPMENT ONLY
 Completion ID Hardening: COMPLETION-ID-HARDENING-02 - PASSED - DEVELOPMENT ONLY
-Next bounded task: REAL-WORKER-PROCESS-IDENTITY-01
+Real Worker Process Identity: REAL-WORKER-PROCESS-IDENTITY-01 - PASSED - DEVELOPMENT ONLY
+Next bounded task: REAL-RUNTIME-TERMINATION-EVIDENCE-01
 Real Runtime Hardening task order: COMPLETION-ID-HARDENING-01 -> REAL-WORKER-PROCESS-IDENTITY-01 -> REAL-RUNTIME-TERMINATION-EVIDENCE-01 -> REAL-RUNTIME-RECONCILIATION-01 -> PROVIDER-CREDENTIAL-REVOCATION-01 -> REAL-RUNTIME-HARDENING-CLOSEOUT-01
 Real Runtime Hardening gate: NOT PASSED / FAIL CLOSED; all unresolved Real-Runtime gates remain fail-closed and its eventual technical closeout alone will not enable GitHub, automatic project execution, RELEASE_CANDIDATE or PRODUCTION
 Prospective repair policy: for every new task, normal bounded editing and check iterations before the first final review snapshot do not consume a repair; after that snapshot is fixed and closeout reviews begin, at most one automatic repair pass is permitted
@@ -34,7 +35,7 @@ Cancellation contract: CANCELLATION-CONTRACT-DECISION-01 - APPROVED - DEVELOPMEN
 Cancellation contract normative SHA-256: 58e44fe0a3638d25bdf34dc5aff8551872796486c343904923cb4f41150a4b9f
 Worker Fake Runtime MVP scope reset: WORKER-FAKE-RUNTIME-MVP-SCOPE-RESET-01 - PASSED_WITH_DEFERRED_HARDENING - DEVELOPMENT ONLY
 Fake Runtime pre-start cancellation: FAKE-RUNTIME-PRESTART-CANCELLATION-01 - PASSED - DEVELOPMENT ONLY
-Real Runtime Hardening: CURRENT - READY FOR FIRST BOUNDED TASK - DEVELOPMENT ONLY - NOT YET PASSED - FAIL CLOSED
+Real Runtime Hardening: CURRENT - IN PROGRESS - DEVELOPMENT ONLY - NOT YET PASSED - FAIL CLOSED
 Real Runtime Hardening prior scheduling status in the merged pre-reconciliation snapshot: REQUIRED - DEFERRED_TO_LATER_GATE - FAIL CLOSED; retained as history while its unresolved gates remain binding
 Cancellation contract implementation: target architecture remains approved; full Real-Runtime implementation is assigned to REAL_RUNTIME_HARDENING and is not passed
 Agent Registry: AGENT-REGISTRY-TUPLE-TYPECHECK-CLOSEOUT-03 - PASSED - DEVELOPMENT ONLY

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   FakeAgentRuntime,
   canonicalAgentOperationDigest,
+  createWorkerProcessIdentityForTest,
   type CodexRuntimeContext,
   type RuntimeStore,
 } from "@software-builder/agent-runtime";
@@ -9,6 +10,7 @@ import type { AgentJobClaim } from "@software-builder/database";
 import { createAgentRuntime } from "./runtime-factory.js";
 
 const projectId = "00000000-0000-4000-8000-000000000001";
+const workerProcessIdentity=createWorkerProcessIdentityForTest("11".repeat(32),"22".repeat(32));
 const task = {
   schemaVersion: 1 as const,
   projectId,
@@ -25,6 +27,8 @@ const claim: AgentJobClaim = {
   projectId,
   task,
   workerId: "worker/synthetic",
+  workerProcessIdentity,
+  processLaunchId:null,
   claimId: "claim/synthetic",
   fencingToken: 1,
   leaseGeneration: 1,
@@ -50,11 +54,14 @@ const context: CodexRuntimeContext = {
   guard: {
     jobId: claim.jobId,
     workerId: claim.workerId,
+    workerProcessIdentity,
+    processLaunchId:null,
     claimId: claim.claimId,
     fencingToken: claim.fencingToken,
     leaseGeneration: claim.leaseGeneration,
     claimedJobVersion: claim.jobVersion,
   },
+  onProcessLaunchBound:()=>undefined,
   assignmentRef: "00000000-0000-4000-8000-000000000003",
   agentId: "00000000-0000-4000-8000-000000000004",
   agentKey: "synthetic-planner",

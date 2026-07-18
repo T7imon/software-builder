@@ -14,6 +14,7 @@ import {
   type CodexProvider,
   type CodexProviderResponse,
 } from "./codex-provider.js";
+import type { ProcessLaunchBinding, ProcessLaunchId, ProcessLaunchReceipt, WorkerProcessIdentity } from "./process-identity.js";
 
 export type CodexRunState = "DISPATCHED" | "SUCCEEDED" | "FAILED" | "TIMED_OUT" | "CANCELLED" | "POLICY_VIOLATION" | "RECOVERY_REQUIRED";
 export type CodexRuntimeFailureCode =
@@ -30,6 +31,8 @@ export type CodexRuntimeFailureCode =
 export interface CodexRuntimeGuard {
   readonly jobId: string;
   readonly workerId: string;
+  readonly workerProcessIdentity: WorkerProcessIdentity;
+  readonly processLaunchId: ProcessLaunchId | null;
   readonly claimId: string;
   readonly fencingToken: number;
   readonly leaseGeneration: number;
@@ -38,6 +41,7 @@ export interface CodexRuntimeGuard {
 
 export interface CodexRuntimeContext {
   readonly guard: CodexRuntimeGuard;
+  readonly onProcessLaunchBound: (processLaunchId: ProcessLaunchId) => void;
   readonly assignmentRef: string;
   readonly agentId: string;
   readonly agentKey: string;
@@ -86,6 +90,12 @@ export interface CodexRuntimePersistence {
     readonly cliVersion: string;
     readonly startedAt: string;
   }): Promise<CodexStartDecision>;
+  bindProcessLaunch(input: {
+    readonly guard: CodexRuntimeGuard;
+    readonly runId: string;
+    readonly binding: ProcessLaunchBinding;
+    readonly receipt: ProcessLaunchReceipt;
+  }): Promise<CodexRuntimeGuard>;
   complete(input: {
     readonly guard: CodexRuntimeGuard;
     readonly runId: string;
@@ -227,6 +237,7 @@ function runtimeStatus(command: RuntimeCommand, run: CodexPersistentRun): Runtim
 }
 
 function providerFailure(error: CodexProviderError): { state: "FAILED" | "TIMED_OUT" | "CANCELLED" | "POLICY_VIOLATION"; code: CodexRuntimeFailureCode } {
+  if(error.code==="CODEX_LAUNCH_BINDING_FAILED")throw error;
   if (error.code === "CODEX_TIMEOUT") return { state: "TIMED_OUT", code: error.code };
   if (error.code === "CODEX_CANCELLED") return { state: "CANCELLED", code: error.code };
   if (error.code === "CODEX_SECURITY_POLICY_VIOLATION") return { state: "POLICY_VIOLATION", code: error.code };
@@ -299,6 +310,8 @@ export class CodexExecAgentRuntime implements AgentRuntime, AbortableAgentRuntim
     });
     if (authorization.action !== "START") return runtimeStatus(command, authorization.run);
     let response: CodexProviderResponse;
+    let activeGuard=this.context.guard;
+    const processLaunchBinding:ProcessLaunchBinding={parentWorkerInstanceId:activeGuard.workerProcessIdentity.instanceId,workerId:activeGuard.workerId,projectId:this.context.projectId,jobId:activeGuard.jobId,taskId:command.taskId,attemptId:command.attemptId,runId:command.runId,assignmentId:this.context.assignmentRef,claimId:activeGuard.claimId,leaseGeneration:activeGuard.leaseGeneration,fencingToken:activeGuard.fencingToken,jobVersion:activeGuard.claimedJobVersion+1};
     try {
       response = await this.provider.execute({
         cli: this.context.cli,
@@ -309,14 +322,17 @@ export class CodexExecAgentRuntime implements AgentRuntime, AbortableAgentRuntim
         prompt: prompt.prompt,
         environment: this.context.childEnvironment,
         timeoutMs: this.context.timeoutMs,
+        processLaunchBinding,
+        onProcessLaunched:async receipt=>{activeGuard=await this.persistence.bindProcessLaunch({guard:activeGuard,runId:command.runId,binding:processLaunchBinding,receipt});this.context.onProcessLaunchBound(activeGuard.processLaunchId!);},
         ...(this.context.model === undefined ? {} : { model: this.context.model }),
         signal,
       });
     } catch (error) {
       const safe = error instanceof CodexProviderError ? error : new CodexProviderError("CODEX_PROCESS_FAILED");
+      if(safe.code==="CODEX_LAUNCH_BINDING_FAILED")throw safe;
       const failure = providerFailure(safe);
       const persisted = await this.persistence.fail({
-        guard: this.context.guard,
+        guard: activeGuard,
         runId: command.runId,
         promptSha256: prompt.sha256,
         state: failure.state,
@@ -328,7 +344,7 @@ export class CodexExecAgentRuntime implements AgentRuntime, AbortableAgentRuntim
     }
     if (response.output.status === "FAILED") {
       const failed = await this.persistence.fail({
-        guard: this.context.guard,
+        guard: activeGuard,
         runId: command.runId,
         promptSha256: prompt.sha256,
         state: "FAILED",
@@ -342,7 +358,7 @@ export class CodexExecAgentRuntime implements AgentRuntime, AbortableAgentRuntim
       return runtimeStatus(command, failed);
     }
     const completed = await this.persistence.complete({
-      guard: this.context.guard,
+      guard: activeGuard,
       runId: command.runId,
       promptSha256: prompt.sha256,
       output: response.output,

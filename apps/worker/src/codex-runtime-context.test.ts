@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createWorkerProcessIdentityForTest } from "@software-builder/agent-runtime";
 import type { AgentJobClaim, CodexClaimContextBinding } from "@software-builder/database";
 import type { ReadyWorkspaceReader, VerifiedWorkspace, WorkspaceConfig } from "@software-builder/project-workspace";
 import { CodexRuntimeContextResolver } from "./codex-runtime-context.js";
@@ -16,6 +17,7 @@ const agentId = "00000000-0000-4000-8000-000000000004";
 const jobId = "00000000-0000-4000-8000-000000000005";
 const gitBranch = "builder/project-00000000/revision-aaaaaaaaaaaaaaaa";
 const temporaryDirectories: string[] = [];
+const workerProcessIdentity=createWorkerProcessIdentityForTest("11".repeat(32),"22".repeat(32));
 
 const task = {
   schemaVersion: 1 as const,
@@ -35,6 +37,8 @@ const claim: AgentJobClaim = {
   task,
   assignment: { assignmentId, agentId, agentKey: "synthetic-planner", agentVersion: 1 },
   workerId: "worker/synthetic",
+  workerProcessIdentity,
+  processLaunchId:null,
   claimId: "claim/synthetic",
   fencingToken: 1,
   leaseGeneration: 1,
