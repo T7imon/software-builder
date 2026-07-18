@@ -14,7 +14,7 @@ if (agentTestModes.includes(mode)) {
   const [
     { Pool },
     { AgentJobRepository, PostgresCodexRuntimeRepository, PostgresWorkspaceRegistrationStore },
-    { FakeAgentRuntime },
+    { FakeAgentRuntime, WorkerProcessBootIdentity },
     { ProjectWorkspaceManager, loadWorkspaceConfig },
     { CodexRuntimeContextResolver },
     { createAgentRuntime },
@@ -42,6 +42,7 @@ if (agentTestModes.includes(mode)) {
   }
   const configuration = readWorkerConfiguration(process.env);
   const pool = new Pool({ connectionString, application_name: "software-builder-agent-worker" });
+  const bootIdentity = WorkerProcessBootIdentity.create();
   try {
     const repository = new AgentJobRepository(pool);
     if (mode === "agent-prestart-cancel") {
@@ -106,8 +107,12 @@ if (agentTestModes.includes(mode)) {
         },
         ...(mode === "agent-crash" ? { afterRuntimePersisted: () => process.exit(86) } : {}),
       });
+      const workerId = process.argv[3] ?? "process-worker";
+      const workerProcessIdentity = bootIdentity.get();
+      await repository.registerWorkerProcess(workerId, workerProcessIdentity);
       const worker = new BackgroundWorker(repository, processor, {
-        workerId: process.argv[3] ?? "process-worker",
+        workerId,
+        workerProcessIdentity,
         leaseMs: Number(process.env.AGENT_WORKER_LEASE_MS ?? 10_000),
         heartbeatIntervalMs: Number(process.env.AGENT_WORKER_HEARTBEAT_MS ?? 1_000),
         pollIntervalMs: Number(process.env.AGENT_WORKER_POLL_MS ?? 100),

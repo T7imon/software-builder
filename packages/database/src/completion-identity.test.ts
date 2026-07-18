@@ -21,17 +21,20 @@ const vector: CompleteAgentJobContext = {
   projectId: "11111111-1111-4111-8111-111111111111",
   role: "PLANNER",
   runId: "run/vector",
-  schemaVersion: 2,
+  schemaVersion: 3,
   taskId: "task/vector",
   workerId: "worker/vector",
+  workerProcessInstanceId: `wpi_${"1".repeat(64)}`,
+  workerOwnershipDigest: `sha256:${"2".repeat(64)}`,
+  processLaunchId: null,
 };
 
 describe("agent job completion identity", () => {
   it("matches the independently calculated SHA-256 UUID-v8 vector", () => {
     expect(completionSemanticDigest({ domain: AGENT_JOB_COMPLETION_DOMAIN, context: vector })).toBe(
-      "bad59cd5a6ba3905de27adb747577eece94802ee222328230fc00cd12211ed19",
+      "8d6fda21c9684f1e3bbb50586b1ad1c481bb5fbb22c2359ce2c8d0e26907f095",
     );
-    expect(deriveAgentJobCompletionId(vector)).toBe("bad59cd5-a6ba-8905-9e27-adb747577eec");
+    expect(deriveAgentJobCompletionId(vector)).toBe("8d6fda21-c968-8f1e-bbbb-50586b1ad1c4");
   });
 
   it("is lowercase UUID-v8 with the RFC variant", () => {
@@ -48,6 +51,9 @@ describe("agent job completion identity", () => {
       { ...vector, runId: "run/other" },
       { ...vector, role: "ARCHITECT" },
       { ...vector, workerId: "worker/other" },
+      { ...vector, workerProcessInstanceId: `wpi_${"3".repeat(64)}` },
+      { ...vector, workerOwnershipDigest: `sha256:${"4".repeat(64)}` },
+      { ...vector, processLaunchId: `pli_${"5".repeat(64)}` },
       { ...vector, claimId: "claim/other" },
       { ...vector, fencingToken: 8 },
       { ...vector, leaseGeneration: 4 },
@@ -83,7 +89,7 @@ describe("agent job completion identity", () => {
   it.each([
     ["missing field", Object.fromEntries(Object.entries(vector).filter(([key]) => key !== "assignment"))],
     ["additional field", { ...vector, arbitraryCompletionId: "00000000-0000-8000-8000-000000000000" }],
-    ["invalid context schema", { ...vector, schemaVersion: 3 }],
+    ["invalid context schema", { ...vector, schemaVersion: 2 }],
     ["invalid operation schema", { ...vector, operationSchemaVersion: 2 }],
     ["operation/discriminator mismatch", { ...vector, operation: "CONFIRM_CANCELLED" }],
     ["malformed project", { ...vector, projectId: "not-a-uuid" }],

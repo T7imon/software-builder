@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import type { AgentTask } from "@software-builder/agent-runtime";
+import { parseProcessLaunchId, parseWorkerOwnershipDigest, parseWorkerProcessInstanceId, type AgentTask, type ProcessLaunchId, type WorkerProcessIdentity } from "@software-builder/agent-runtime";
 
-export const AGENT_JOB_COMPLETION_DOMAIN = "software-builder/agent-job-completion/v2" as const;
+export const AGENT_JOB_COMPLETION_DOMAIN = "software-builder/agent-job-completion/v3" as const;
 
 export interface CompletionAssignmentBinding {
   readonly assignmentId: string;
@@ -11,7 +11,7 @@ export interface CompletionAssignmentBinding {
 }
 
 interface CompletionContextBase {
-  readonly schemaVersion: 2;
+  readonly schemaVersion: 3;
   readonly operationSchemaVersion: 1;
   readonly projectId: string;
   readonly jobId: string;
@@ -20,6 +20,9 @@ interface CompletionContextBase {
   readonly runId: string;
   readonly role: AgentTask["role"];
   readonly workerId: string;
+  readonly workerProcessInstanceId: string;
+  readonly workerOwnershipDigest: string;
+  readonly processLaunchId: string | null;
   readonly claimId: string;
   readonly fencingToken: number;
   readonly leaseGeneration: number;
@@ -45,6 +48,7 @@ export interface ConfirmCancelledAgentJobContext extends CompletionContextBase {
 }
 
 export type AgentJobCompletionContext = CompleteAgentJobContext | ConfirmCancelledAgentJobContext;
+const completionWorkerIdentity = new WeakMap<object, WorkerProcessIdentity>();
 
 export interface CompletionClaimBinding {
   readonly jobId: string;
@@ -52,6 +56,8 @@ export interface CompletionClaimBinding {
   readonly task: Pick<AgentTask, "taskId" | "attemptId" | "runId" | "role">;
   readonly assignment?: CompletionAssignmentBinding;
   readonly workerId: string;
+  readonly workerProcessIdentity: WorkerProcessIdentity;
+  readonly processLaunchId: ProcessLaunchId | null;
   readonly claimId: string;
   readonly fencingToken: number;
   readonly leaseGeneration: number;
@@ -60,22 +66,33 @@ export interface CompletionClaimBinding {
 }
 
 export function createAgentJobCompletionContext(claim: CompletionClaimBinding): CompleteAgentJobContext {
-  return {
+  const context: CompleteAgentJobContext = {
     ...baseContext(claim),
     operation: "COMPLETE",
     discriminator: { kind: "RUNTIME_WATERMARK", runtimeWatermark: claim.runtimeWatermark },
   };
+  completionWorkerIdentity.set(context, claim.workerProcessIdentity);
+  return context;
 }
 
 export function createAgentJobCancellationCompletionContext(
   claim: CompletionClaimBinding,
   evidenceId: string,
 ): ConfirmCancelledAgentJobContext {
-  return {
+  const context: ConfirmCancelledAgentJobContext = {
     ...baseContext(claim),
     operation: "CONFIRM_CANCELLED",
     discriminator: { kind: "TERMINATION_EVIDENCE", evidenceId, runtimeWatermark: claim.runtimeWatermark },
   };
+  completionWorkerIdentity.set(context, claim.workerProcessIdentity);
+  return context;
+}
+
+/** Resolves process-local possession material without ever serializing it into the completion context. */
+export function resolveCompletionWorkerProcessIdentity(context: AgentJobCompletionContext): WorkerProcessIdentity {
+  const identity = completionWorkerIdentity.get(context);
+  if (!identity) throw new Error("COMPLETION_WORKER_PROCESS_PROOF_MISSING");
+  return identity;
 }
 
 export function deriveAgentJobCompletionId(context: AgentJobCompletionContext): string {
@@ -95,13 +112,16 @@ export function assertAgentJobCompletionContext(value: unknown): asserts value i
   if (!isRecord(value)) throw new Error("COMPLETION_CONTEXT_INVALID");
   exactKeys(value, [
     "assignment", "attemptId", "claimId", "discriminator", "fencingToken", "jobId", "jobVersion",
-    "leaseGeneration", "operation", "operationSchemaVersion", "projectId", "role", "runId", "schemaVersion",
-    "taskId", "workerId",
+    "leaseGeneration", "operation", "operationSchemaVersion", "processLaunchId", "projectId", "role", "runId",
+    "schemaVersion", "taskId", "workerId", "workerOwnershipDigest", "workerProcessInstanceId",
   ]);
-  if (value.schemaVersion !== 2 || value.operationSchemaVersion !== 1) throw new Error("COMPLETION_CONTEXT_INVALID");
+  if (value.schemaVersion !== 3 || value.operationSchemaVersion !== 1) throw new Error("COMPLETION_CONTEXT_INVALID");
   uuid(value.projectId); uuid(value.jobId);
   bounded(value.taskId, 1, 512); bounded(value.attemptId, 1, 512); bounded(value.runId, 1, 512);
   boundedOwner(value.workerId); boundedOwner(value.claimId);
+  parseWorkerProcessInstanceId(value.workerProcessInstanceId);
+  parseWorkerOwnershipDigest(value.workerOwnershipDigest);
+  if (value.processLaunchId !== null) parseProcessLaunchId(value.processLaunchId);
   const roles: readonly AgentTask["role"][] = ["PLANNER", "ARCHITECT", "SECURITY", "LEGAL", "EXECUTOR", "QA", "REVIEWER"];
   if (!roles.includes(value.role as AgentTask["role"])) throw new Error("COMPLETION_CONTEXT_INVALID");
   positive(value.fencingToken); positive(value.leaseGeneration); positive(value.jobVersion);
@@ -128,7 +148,7 @@ export function assertAgentJobCompletionContext(value: unknown): asserts value i
 
 function baseContext(claim: CompletionClaimBinding): CompletionContextBase {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     operationSchemaVersion: 1,
     projectId: claim.projectId,
     jobId: claim.jobId,
@@ -137,6 +157,9 @@ function baseContext(claim: CompletionClaimBinding): CompletionContextBase {
     runId: claim.task.runId,
     role: claim.task.role,
     workerId: claim.workerId,
+    workerProcessInstanceId: claim.workerProcessIdentity.instanceId,
+    workerOwnershipDigest: claim.workerProcessIdentity.ownershipDigest,
+    processLaunchId: claim.processLaunchId,
     claimId: claim.claimId,
     fencingToken: claim.fencingToken,
     leaseGeneration: claim.leaseGeneration,

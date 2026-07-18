@@ -4,10 +4,12 @@ import { afterAll,beforeAll,describe,expect,it } from "vitest";
 import { canonicalAgentOperationDigest,FakeAgentRuntime,type AgentResult } from "@software-builder/agent-runtime";
 import type { PlanningJobResult,PlanningJobRole,PlanningResultOutcome,PlanningStatusView } from "@software-builder/workflow-engine";
 import { AgentJobRepository,HmacCapabilityAuthority,PostgresDatabase,PostgresPlanningOrchestratorRepository,PostgresProjectContextIssuer,createAgentJobCompletionContext } from "./index.js";
+import { RegisteredWorkerProcessFixtureForTest } from "./agent-job-test-fixture.js";
 import { migrate,resetDatabase } from "./migrations.js";
 
 const adminUrl=process.env.TEST_DATABASE_URL;
 const digest=(value:string)=>createHash("sha256").update(value).digest("hex");
+const testWorkers=new RegisteredWorkerProcessFixtureForTest("planning-orchestrator-integration");
 const waitForDatabaseQuiescence=async(pool:Pool,timeoutMs=5_000)=>{const deadline=Date.now()+timeoutMs;while(Date.now()<deadline){const active=await pool.query<{count:string}>("SELECT count(*) count FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()");if(Number(active.rows[0]!.count)===0)return;await new Promise(resolve=>setTimeout(resolve,5));}throw new Error("Timed out waiting for test database quiescence");};
 
 describe("Planning Orchestrator PostgreSQL integration",()=>{
@@ -36,7 +38,7 @@ describe("Planning Orchestrator PostgreSQL integration",()=>{
 
   async function completeRuntimeRole(status:PlanningStatusView,role:PlanningJobRole):Promise<PlanningJobResult>{
     const planningJob=(await orchestrator.listPlanningJobs(status.projectId,status.planningRunId)).find(job=>job.role===role);if(!planningJob)throw new Error(`Missing ${role} planning job`);
-    const claim=await runtimeJobs.claimNext(`planning-worker-${role.toLowerCase()}`,`claim-${randomUUID()}`,120_000);if(!claim||claim.jobId!==planningJob.backgroundJobId)throw new Error(`Unexpected runtime claim for ${role}`);
+    const claim=await testWorkers.claimNext(runtimeJobs,`planning-worker-${role.toLowerCase()}`,`claim-${randomUUID()}`,120_000);if(!claim||claim.jobId!==planningJob.backgroundJobId)throw new Error(`Unexpected runtime claim for ${role}`);
     const command={runId:claim.task.runId,projectId:claim.projectId,taskId:claim.task.taskId,attemptId:claim.task.attemptId,idempotencyKey:`start-${claim.jobId}-${claim.fencingToken}`,requestDigest:canonicalAgentOperationDigest("startRun",claim.task),fencingToken:claim.fencingToken,task:claim.task};
     const runtime=(await new FakeAgentRuntime({now:()=>new Date("2026-07-15T12:00:00.000Z")}).startRun(command)).result;if(!runtime)throw new Error("Fake runtime did not produce a result");
     await runtimeJobs.complete(createAgentJobCompletionContext(claim),runtime);

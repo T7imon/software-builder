@@ -40,6 +40,8 @@ export class CodexRuntimeContextResolver {
     const guard = {
       jobId: claim.jobId,
       workerId: claim.workerId,
+      workerProcessIdentity: claim.workerProcessIdentity,
+      processLaunchId: claim.processLaunchId,
       claimId: claim.claimId,
       fencingToken: claim.fencingToken,
       leaseGeneration: claim.leaseGeneration,
@@ -91,6 +93,7 @@ export class CodexRuntimeContextResolver {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > CODEX_DEVELOPMENT_TIMEOUT_MS) throw new Error("CODEX_TIMEOUT_INVALID");
     return {
       guard,
+      onProcessLaunchBound:(processLaunchId)=>{claim.processLaunchId=processLaunchId;},
       assignmentRef: binding.assignmentId,
       agentId: binding.agentId,
       agentKey: binding.agentKey,

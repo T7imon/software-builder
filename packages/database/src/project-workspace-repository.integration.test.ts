@@ -25,10 +25,12 @@ import {
   PostgresProjectContextIssuer,
   createAgentJobCompletionContext,
 } from "./index.js";
+import { RegisteredWorkerProcessFixtureForTest } from "./agent-job-test-fixture.js";
 import { migrate, resetDatabase } from "./migrations.js";
 
 const adminUrl = process.env.TEST_DATABASE_URL;
 const digest = (value: string): string => createHash("sha256").update(value).digest("hex");
+const testWorkers = new RegisteredWorkerProcessFixtureForTest("project-workspace-repository-integration");
 const waitForDatabaseQuiescence = async (pool: Pool, timeoutMs = 5_000): Promise<void> => {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -141,7 +143,7 @@ describe("Project Workspace PostgreSQL integration", () => {
   async function completeRuntimeRole(status: PlanningStatusView, role: PlanningJobRole): Promise<PlanningJobResult> {
     const job = (await orchestrator.listPlanningJobs(status.projectId, status.planningRunId)).find((item) => item.role === role);
     if (!job) throw new Error(`Missing ${role} planning job`);
-    const claim = await runtimeJobs.claimNext(`workspace-worker-${role.toLowerCase()}`, `claim-${randomUUID()}`, 120_000);
+    const claim = await testWorkers.claimNext(runtimeJobs, `workspace-worker-${role.toLowerCase()}`, `claim-${randomUUID()}`, 120_000);
     if (!claim || claim.jobId !== job.backgroundJobId) throw new Error(`Unexpected runtime claim for ${role}`);
     const command = {
       runId: claim.task.runId,

@@ -10,6 +10,7 @@ import {
   CodexExecProvider,
   FakeAgentRuntime,
   NodeCodexProcessLauncher,
+  WorkerProcessBootIdentity,
   canonicalAgentOperationDigest,
   type AgentResult,
   type AgentTask,
@@ -43,12 +44,14 @@ const enabled = process.env.AGENT_RUNTIME === "codex"
   && process.env.CODEX_REAL_SMOKE_TEST === "1"
   && typeof process.env.BUILDER_CODEX_HOME === "string"
   && process.env.BUILDER_CODEX_HOME.length > 0;
+const smokeWorkerId = "codex-real-smoke-worker";
+const smokeWorkerBootIdentity = WorkerProcessBootIdentity.create();
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const digest = (value: string): string => createHash("sha256").update(value).digest("hex");
 
 class CountingLauncher implements CodexProcessLauncher {
   readonly specs: CodexProcessSpec[] = [];
-  constructor(private readonly inner = new NodeCodexProcessLauncher()) {}
+  constructor(private readonly inner = NodeCodexProcessLauncher.create()) {}
   start(spec: CodexProcessSpec): CodexChildProcess {
     this.specs.push(spec);
     return this.inner.start(spec);
@@ -243,13 +246,15 @@ describe.skipIf(!enabled)("real Codex Exec PLANNER smoke", () => {
 
     const orchestrator = PostgresPlanningOrchestratorRepository.forTestHarness(admin);
     const runtimeJobs = new AgentJobRepository(admin);
+    const smokeWorkerIdentity = smokeWorkerBootIdentity.get();
+    await runtimeJobs.registerWorkerProcess(smokeWorkerId, smokeWorkerIdentity);
     const codexRepository = new PostgresCodexRuntimeRepository(admin);
     const completeRuntimeRole = async (status: PlanningStatusView, role: PlanningJobRole): Promise<PlanningJobResult> => {
       const planningJob = (await orchestrator.listPlanningJobs(status.projectId, status.planningRunId)).find(
         (item) => item.role === role,
       );
       if (!planningJob) throw new Error(`Missing ${role} smoke planning job`);
-      const claim = await runtimeJobs.claimNext(`smoke-setup-${role.toLowerCase()}`, `claim-${randomUUID()}`, 120_000);
+      const claim = await runtimeJobs.claimNext(smokeWorkerId, `claim-${randomUUID()}`, 120_000, smokeWorkerIdentity);
       if (!claim || claim.jobId !== planningJob.backgroundJobId) throw new Error(`Unexpected smoke setup claim for ${role}`);
       const result = (await new FakeAgentRuntime().startRun({
         runId: claim.task.runId,
@@ -367,7 +372,7 @@ describe.skipIf(!enabled)("real Codex Exec PLANNER smoke", () => {
       planningTask: "Read PROJECT.md and return one concise requirements plan for the synthetic status endpoint.",
       createdBy: "codex-real-smoke",
     });
-    const claim = await runtimeJobs.claimNext("codex-real-smoke-worker", "codex-real-smoke-claim", 120_000);
+    const claim = await runtimeJobs.claimNext(smokeWorkerId, "codex-real-smoke-claim", 120_000, smokeWorkerIdentity);
     if (!claim || claim.jobId !== enqueued.jobId) throw new Error("Unexpected real Codex smoke claim");
 
     const beforeDigest = await workspaceDigest(workspace.absolutePath);
@@ -397,6 +402,8 @@ describe.skipIf(!enabled)("real Codex Exec PLANNER smoke", () => {
     await runtimeJobs.authorizeRuntimeStart({
       jobId: claim.jobId,
       workerId: claim.workerId,
+      workerProcessIdentity:claim.workerProcessIdentity,
+      processLaunchId:claim.processLaunchId,
       claimId: claim.claimId,
       fencingToken: claim.fencingToken,
       jobVersion: claim.jobVersion,

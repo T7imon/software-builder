@@ -250,7 +250,7 @@ The milestone is current but not passed. Its unresolved gates remain fail closed
 | Order | Bounded task | Required scope | Dependency |
 |---:|---|---|---|
 | 1 | `COMPLETION-ID-HARDENING-01` | Bind every completion identity to the authoritative job, run, claim, generation, and runtime context; stale, duplicate, absent, or mismatched completion identities fail closed. | Milestone dependencies satisfied; separate immutable task contract |
-| 2 | `REAL-WORKER-PROCESS-IDENTITY-01` | Establish real worker and process identity, ownership, lease, and claim-context binding without relying on FakeRuntime identity. | Task 1 passed |
+| 2 | `REAL-WORKER-PROCESS-IDENTITY-01 - PASSED - DEVELOPMENT ONLY` | Establish real worker and process identity, ownership, lease, and claim-context binding without relying on FakeRuntime identity. | Task 1 passed |
 | 3 | `REAL-RUNTIME-TERMINATION-EVIDENCE-01` | Implement real status and termination evidence, `WORKLOAD_NOT_CREATED` evidence, process-tree termination, and context-bound cancel confirmation; unclear outcomes remain `CANCEL_STUCK` or blocked. | Task 2 passed |
 | 4 | `REAL-RUNTIME-RECONCILIATION-01` | Implement distributed multiprocess final reconciliation, actual runtime-status queries, and crash recovery between external query and evidence commit; stale or out-of-order outcomes fail closed. | Task 3 passed |
 | 5 | `PROVIDER-CREDENTIAL-REVOCATION-01` | Prove attempt-bound provider credential, capability, and mount revocation; missing, stale, or uncertain revocation blocks progression. | Task 4 passed |

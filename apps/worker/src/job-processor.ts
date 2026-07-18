@@ -98,8 +98,8 @@ export class AgentJobProcessor {
     await this.repository.recordCancellationFailure(store.guard(),"REJECTED",status.terminal?"TERMINATION_EVIDENCE_MISSING":"RUNTIME_CANCEL_REJECTED",this.cancellationRetryDelayMs,this.watermark(status));
   }
 
-  private async complete(store:PostgresRuntimeStore,result:AgentResult):Promise<void>{const current=await this.repository.loadClaim(store.guard());await this.repository.complete(createAgentJobCompletionContext(current),result);}
-  private async confirmEvidence(store:PostgresRuntimeStore,status:RuntimeStatus):Promise<boolean>{const candidate=status.terminationEvidence;if(!candidate)return false;const decision=await this.repository.verifyTerminationEvidence(store.guard(),candidate);if(decision.validity!=="VALID")return false;const current=await this.repository.loadClaim(store.guard());await this.repository.confirmCancelled(createAgentJobCancellationCompletionContext(current,candidate.evidenceId),this.cancelledResult(current));return true;}
+  private async complete(store:PostgresRuntimeStore,result:AgentResult):Promise<void>{const current=await this.repository.loadClaim(store.guard());await this.repository.complete(createAgentJobCompletionContext(current),result,store.guard());}
+  private async confirmEvidence(store:PostgresRuntimeStore,status:RuntimeStatus):Promise<boolean>{const candidate=status.terminationEvidence;if(!candidate)return false;const decision=await this.repository.verifyTerminationEvidence(store.guard(),candidate);if(decision.validity!=="VALID")return false;const current=await this.repository.loadClaim(store.guard());await this.repository.confirmCancelled(createAgentJobCancellationCompletionContext(current,candidate.evidenceId),this.cancelledResult(current),store.guard());return true;}
   private watermark(status:RuntimeStatus|undefined):number{return status?.progress.at(-1)?.sequence??0;}
 
   private withCancellationTimeout(operation:Promise<RuntimeStatus>):Promise<RuntimeStatus>{

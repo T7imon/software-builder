@@ -5,6 +5,7 @@ import {
   CodexExecInFlightCoordinator,
   CodexProviderError,
   canonicalAgentOperationDigest,
+  createWorkerProcessIdentityForTest,
   type AgentRole,
   type CodexPersistentRun,
   type CodexProvider,
@@ -14,6 +15,8 @@ import {
   type CodexStartDecision,
   type StartRunCommand,
 } from "./index.js";
+
+const workerProcessIdentity=createWorkerProcessIdentityForTest("11".repeat(32),"22".repeat(32));
 
 const plannerOutput = {
   status: "SUCCEEDED" as const,
@@ -28,11 +31,14 @@ const context: CodexRuntimeContext = {
   guard: {
     jobId: "00000000-0000-4000-8000-000000000001",
     workerId: "worker/synthetic",
+    workerProcessIdentity,
+    processLaunchId:null,
     claimId: "claim/synthetic",
     fencingToken: 1,
     leaseGeneration: 1,
     claimedJobVersion: 1,
   },
+  onProcessLaunchBound:()=>undefined,
   assignmentRef: "00000000-0000-4000-8000-000000000002",
   agentId: "00000000-0000-4000-8000-000000000003",
   agentKey: "synthetic-planner",
@@ -114,6 +120,7 @@ function persistentRun(
 
 type TestPersistence = CodexRuntimePersistence & {
   authorizeStart: ReturnType<typeof vi.fn>;
+  bindProcessLaunch: ReturnType<typeof vi.fn>;
   complete: ReturnType<typeof vi.fn>;
   fail: ReturnType<typeof vi.fn>;
   load: ReturnType<typeof vi.fn>;
@@ -125,6 +132,7 @@ function persistence(overrides: Partial<CodexRuntimePersistence> = {}): TestPers
       action: "START",
       run: persistentRun(input),
     } satisfies CodexStartDecision)),
+    bindProcessLaunch:vi.fn(async(input:Parameters<CodexRuntimePersistence["bindProcessLaunch"]>[0])=>({...input.guard,processLaunchId:input.receipt.processLaunchId})),
     complete: vi.fn(async (input: Parameters<CodexRuntimePersistence["complete"]>[0]) => ({
       ...persistentRun(input, "SUCCEEDED"),
       output: input.output,

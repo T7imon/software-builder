@@ -15,7 +15,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CodexExecProvider,
   CodexJsonlAccumulator,
+  NodeCodexProcessLauncher,
   CodexProviderError,
+  createProcessLaunchReceiptForTest,
+  createWorkerProcessIdentityForTest,
   provisionCodexRunAuth,
   validateBuilderCodexHome,
   type CodexChildProcess,
@@ -23,6 +26,7 @@ import {
   type CodexProcessLauncher,
   type CodexProcessSpec,
   type CodexProviderRequest,
+  type ProcessLaunchReceipt,
 } from "./index.js";
 
 const plannerOutput = {
@@ -56,6 +60,7 @@ function lines(...events: unknown[]): string {
 }
 
 class TestChild implements CodexChildProcess {
+  launchReceipt!: ProcessLaunchReceipt;
   readonly stderr: AsyncIterable<Uint8Array | string>;
   readonly stdout: AsyncIterable<Uint8Array | string>;
   prompt: string | undefined;
@@ -101,11 +106,13 @@ class TestLauncher implements CodexProcessLauncher {
   start(spec: CodexProcessSpec): CodexChildProcess {
     this.specs.push(spec);
     this.onStart?.(spec);
+    this.child.launchReceipt=createProcessLaunchReceiptForTest(4242,spec.launchBinding,"33".repeat(32),"44".repeat(32));
     return this.child;
   }
 }
 
 function request(overrides: Partial<CodexProviderRequest> = {}): CodexProviderRequest {
+  const worker=createWorkerProcessIdentityForTest("11".repeat(32),"22".repeat(32));
   return {
     cli: {
       packageName: "@openai/codex",
@@ -126,8 +133,51 @@ function request(overrides: Partial<CodexProviderRequest> = {}): CodexProviderRe
     },
     timeoutMs: 1_000,
     ...overrides,
+    processLaunchBinding:overrides.processLaunchBinding??{parentWorkerInstanceId:worker.instanceId,workerId:"worker/synthetic",projectId:"00000000-0000-4000-8000-000000000004",jobId:"00000000-0000-4000-8000-000000000001",taskId:"task/synthetic",attemptId:"attempt/synthetic",runId:"run/synthetic",assignmentId:"00000000-0000-4000-8000-000000000002",claimId:"claim/synthetic",leaseGeneration:1,fencingToken:1,jobVersion:2},
+    onProcessLaunched:overrides.onProcessLaunched??(async()=>undefined),
   };
 }
+
+describe("NodeCodexProcessLauncher", () => {
+  const spec = (launchBinding: CodexProviderRequest["processLaunchBinding"]): CodexProcessSpec => ({
+    executable: "synthetic-node",
+    arguments: ["synthetic-child.js"],
+    workingDirectory: ".",
+    environment: {},
+    launchBinding,
+  });
+
+  it("rejects a malformed launch binding before starting any child", () => {
+    const spawnChild = vi.fn();
+    const launcher = NodeCodexProcessLauncher.forTest({
+      spawnChild: spawnChild as never,
+      createLaunchReceipt: createProcessLaunchReceiptForTest as never,
+    });
+    const valid = request().processLaunchBinding;
+
+    expect(() => launcher.start(spec({ ...valid, injected: "not-authoritative" } as never))).toThrow(
+      "PROCESS_LAUNCH_BINDING_INVALID",
+    );
+    expect(spawnChild).not.toHaveBeenCalled();
+  });
+
+  it("best-effort kills the started child when launch-receipt creation fails", () => {
+    const kill = vi.fn();
+    const child = { pid: 4242, kill };
+    const spawnChild = vi.fn(() => child);
+    const receiptFailure = new Error("SYNTHETIC_RECEIPT_CREATION_FAILED");
+    const launcher = NodeCodexProcessLauncher.forTest({
+      spawnChild: spawnChild as never,
+      createLaunchReceipt: () => {
+        throw receiptFailure;
+      },
+    });
+
+    expect(() => launcher.start(spec(request().processLaunchBinding))).toThrow(receiptFailure);
+    expect(spawnChild).toHaveBeenCalledTimes(1);
+    expect(kill).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("CodexExecProvider", () => {
   it("spawns the pinned JavaScript launcher through Node, parses safe JSONL metadata, and writes the prompt via stdin", async () => {

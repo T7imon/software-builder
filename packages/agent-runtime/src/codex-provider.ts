@@ -18,6 +18,7 @@ import {
   type CodexProviderMetadata,
   type CodexUsage,
 } from "./codex-schemas.js";
+import { assertProcessLaunchBinding, assertProcessLaunchReceipt, createProcessLaunchReceipt, type ProcessLaunchBinding, type ProcessLaunchReceipt } from "./process-identity.js";
 
 export type CodexPolicyEvent = "MCP_TOOL_CALL" | "WEB_SEARCH" | "FORBIDDEN_INTEGRATION";
 export type CodexProviderErrorCode =
@@ -25,6 +26,7 @@ export type CodexProviderErrorCode =
   | "CODEX_TIMEOUT"
   | "CODEX_SPAWN_FAILED"
   | "CODEX_PROCESS_FAILED"
+  | "CODEX_LAUNCH_BINDING_FAILED"
   | "CODEX_JSONL_INVALID"
   | "CODEX_OUTPUT_INVALID"
   | "CODEX_OUTPUT_FAILED"
@@ -48,6 +50,8 @@ export interface CodexProviderRequest {
   readonly timeoutMs: number;
   readonly model?: string;
   readonly signal?: AbortSignal;
+  readonly processLaunchBinding: ProcessLaunchBinding;
+  readonly onProcessLaunched: (receipt: ProcessLaunchReceipt) => Promise<void>;
 }
 
 export interface CodexProviderResponse extends CodexProviderMetadata {
@@ -61,6 +65,7 @@ export interface CodexProcessSpec {
   readonly arguments: readonly string[];
   readonly workingDirectory: string;
   readonly environment: NodeJS.ProcessEnv;
+  readonly launchBinding: ProcessLaunchBinding;
 }
 
 export interface CodexProcessExit {
@@ -69,6 +74,7 @@ export interface CodexProcessExit {
 }
 
 export interface CodexChildProcess {
+  readonly launchReceipt: ProcessLaunchReceipt;
   readonly stdout: AsyncIterable<Uint8Array | string>;
   readonly stderr: AsyncIterable<Uint8Array | string>;
   writePrompt(prompt: string): Promise<void>;
@@ -85,7 +91,7 @@ class SpawnedCodexChild implements CodexChildProcess {
   readonly stderr: Readable;
   private readonly stdin: NonNullable<ReturnType<typeof spawn>["stdin"]>;
   private readonly exit: Promise<CodexProcessExit>;
-  constructor(private readonly child: ReturnType<typeof spawn>) {
+  constructor(private readonly child: ReturnType<typeof spawn>,readonly launchReceipt:ProcessLaunchReceipt) {
     if (!child.stdout || !child.stderr || !child.stdin) throw new CodexProviderError("CODEX_SPAWN_FAILED");
     this.stdout = child.stdout;
     this.stderr = child.stderr;
@@ -126,15 +132,55 @@ class SpawnedCodexChild implements CodexChildProcess {
   }
 }
 
+export interface NodeCodexProcessLauncherTestSeam {
+  readonly spawnChild: (spec: CodexProcessSpec) => ReturnType<typeof spawn>;
+  readonly createLaunchReceipt: (processId: number, binding: ProcessLaunchBinding) => ProcessLaunchReceipt;
+}
+
 export class NodeCodexProcessLauncher implements CodexProcessLauncher {
+  private constructor(
+    private readonly spawnChild: (spec: CodexProcessSpec) => ReturnType<typeof spawn>,
+    private readonly createLaunchReceipt: (processId: number, binding: ProcessLaunchBinding) => ProcessLaunchReceipt,
+  ) {}
+
+  static create(): NodeCodexProcessLauncher {
+    return new NodeCodexProcessLauncher(
+      (spec) => spawn(spec.executable, [...spec.arguments], {
+        cwd: spec.workingDirectory,
+        env: spec.environment,
+        shell: false,
+        windowsHide: process.platform === "win32",
+        stdio: ["pipe", "pipe", "pipe"],
+      }),
+      createProcessLaunchReceipt,
+    );
+  }
+
+  /** Explicit deterministic seam for launcher lifecycle tests only. */
+  static forTest(seam: NodeCodexProcessLauncherTestSeam): NodeCodexProcessLauncher {
+    if (typeof seam?.spawnChild !== "function" || typeof seam.createLaunchReceipt !== "function") {
+      throw new Error("NODE_CODEX_PROCESS_LAUNCHER_TEST_SEAM_INVALID");
+    }
+    return new NodeCodexProcessLauncher(seam.spawnChild, seam.createLaunchReceipt);
+  }
+
   start(spec: CodexProcessSpec): CodexChildProcess {
-    return new SpawnedCodexChild(spawn(spec.executable, [...spec.arguments], {
-      cwd: spec.workingDirectory,
-      env: spec.environment,
-      shell: false,
-      windowsHide: process.platform === "win32",
-      stdio: ["pipe", "pipe", "pipe"],
-    }));
+    const binding = assertProcessLaunchBinding(spec.launchBinding);
+    const child = this.spawnChild({ ...spec, launchBinding: binding });
+    try {
+      if (!Number.isSafeInteger(child.pid) || !child.pid || child.pid < 1) {
+        throw new CodexProviderError("CODEX_SPAWN_FAILED");
+      }
+      const receipt = assertProcessLaunchReceipt(this.createLaunchReceipt(child.pid, binding), binding);
+      return new SpawnedCodexChild(child, receipt);
+    } catch (error) {
+      try {
+        child.kill();
+      } catch {
+        // Best effort only. This task creates no termination evidence or termination claim.
+      }
+      throw error;
+    }
   }
 }
 
@@ -740,7 +786,7 @@ export interface CodexProvider {
 
 export class CodexExecProvider implements CodexProvider {
   constructor(
-    private readonly launcher: CodexProcessLauncher = new NodeCodexProcessLauncher(),
+    private readonly launcher: CodexProcessLauncher = NodeCodexProcessLauncher.create(),
     private readonly now: () => Date = () => new Date(),
     private readonly provisionRunAuth: (
       builderCodexHome: string,
@@ -760,7 +806,7 @@ export class CodexExecProvider implements CodexProvider {
       ...(request.model === undefined ? {} : { model: request.model }),
     });
     const runHome = await createIsolatedRunHome(request);
-    let child: CodexChildProcess;
+    let child: CodexChildProcess | undefined;
     try {
       if (signalIsAborted(request.signal)) throw new CodexProviderError("CODEX_CANCELLED");
       const authReceipt = await this.provisionRunAuth(request.builderCodexHome, runHome.codexHome);
@@ -773,12 +819,17 @@ export class CodexExecProvider implements CodexProvider {
         arguments: [request.cli.binPath, ...args],
         workingDirectory: request.workspacePath,
         environment: childEnvironment,
+        launchBinding: request.processLaunchBinding,
       });
+      assertProcessLaunchReceipt(child.launchReceipt,request.processLaunchBinding);
+      try{await request.onProcessLaunched(child.launchReceipt);}catch{throw new CodexProviderError("CODEX_LAUNCH_BINDING_FAILED");}
     } catch (error) {
+      child?.kill();
       await removeIsolatedRunHome(runHome);
       if (error instanceof CodexProviderError) throw error;
       throw new CodexProviderError("CODEX_SPAWN_FAILED");
     }
+    if(!child)throw new CodexProviderError("CODEX_SPAWN_FAILED");
     const parser = new CodexJsonlAccumulator();
     let stop: ((error: CodexProviderError) => void) | undefined;
     const stopped = new Promise<never>((_resolve, reject) => {
