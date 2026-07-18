@@ -6,7 +6,7 @@ import type {
   ImplementationExecutorResult,ImplementationJobRole,ImplementationReviewOutcome,ImplementationReviewResult,
   ImplementationReviewRole,ImplementationStatusView,PlanningJobResult,PlanningJobRole,PlanningStatusView,
 } from "@software-builder/workflow-engine";
-import { AgentJobRepository,HmacCapabilityAuthority,PostgresDatabase,PostgresPlanningOrchestratorRepository,PostgresProjectContextIssuer } from "./index.js";
+import { AgentJobRepository,HmacCapabilityAuthority,PostgresDatabase,PostgresPlanningOrchestratorRepository,PostgresProjectContextIssuer,createAgentJobCompletionContext } from "./index.js";
 import { migrate,resetDatabase } from "./migrations.js";
 
 const adminUrl=process.env.TEST_DATABASE_URL;
@@ -47,7 +47,7 @@ describe("Implementation Orchestrator PostgreSQL integration",()=>{
     const task={...claim.task,scenario};
     const command={runId:task.runId,projectId:task.projectId,taskId:task.taskId,attemptId:task.attemptId,idempotencyKey:`start-${claim.jobId}-${claim.fencingToken}`,requestDigest:canonicalAgentOperationDigest("startRun",task),fencingToken:claim.fencingToken,task};
     const runtime=(await new FakeAgentRuntime({now:()=>fixedCreatedAt}).startRun(command)).result;if(!runtime)throw new Error("Fake runtime did not produce a terminal result");
-    await runtimeJobs.complete({jobId:claim.jobId,workerId:claim.workerId,claimId:claim.claimId,fencingToken:claim.fencingToken},runtime,randomUUID());
+    await runtimeJobs.complete(createAgentJobCompletionContext(claim),runtime);
     const runtimeResultId=(await admin.query<{agent_result_id:string}>("SELECT agent_result_id FROM builder.background_jobs WHERE id=$1",[claim.jobId])).rows[0]!.agent_result_id;
     return{runtime,runtimeResultId};
   }

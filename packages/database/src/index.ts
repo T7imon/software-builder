@@ -21,6 +21,7 @@ export * from "./capabilities.js";
 export * from "./types.js";
 export * from "./workflow-repository.js";
 export * from "./agent-job-repository.js";
+export * from "./completion-identity.js";
 export * from "./agent-assignment.js";
 export * from "./agent-registry.js";
 export * from "./planning-orchestrator-repository.js";

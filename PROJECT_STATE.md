@@ -5,10 +5,12 @@ GitHub integration enabled: NO
 Automatic project execution: NO
 Production deployment: DISABLED
 Release level: DEVELOPMENT_ONLY
-Milestone status: READY FOR FIRST BOUNDED TASK - DEVELOPMENT ONLY
-Next bounded task: COMPLETION-ID-HARDENING-01
+Milestone status: IN PROGRESS - DEVELOPMENT ONLY
+Completion ID Hardening predecessor: COMPLETION-ID-HARDENING-01 - SCOPE_EXPANSION_REQUIRED - DEVELOPMENT ONLY
+Completion ID Hardening: COMPLETION-ID-HARDENING-02 - PASSED - DEVELOPMENT ONLY
+Next bounded task: REAL-WORKER-PROCESS-IDENTITY-01
 Real Runtime Hardening task order: COMPLETION-ID-HARDENING-01 -> REAL-WORKER-PROCESS-IDENTITY-01 -> REAL-RUNTIME-TERMINATION-EVIDENCE-01 -> REAL-RUNTIME-RECONCILIATION-01 -> PROVIDER-CREDENTIAL-REVOCATION-01 -> REAL-RUNTIME-HARDENING-CLOSEOUT-01
-Real Runtime Hardening gate: current milestone is not passed; all unresolved Real-Runtime gates remain fail-closed and its eventual technical closeout alone will not enable GitHub, automatic project execution, RELEASE_CANDIDATE or PRODUCTION
+Real Runtime Hardening gate: NOT PASSED / FAIL CLOSED; all unresolved Real-Runtime gates remain fail-closed and its eventual technical closeout alone will not enable GitHub, automatic project execution, RELEASE_CANDIDATE or PRODUCTION
 Prospective repair policy: for every new task, normal bounded editing and check iterations before the first final review snapshot do not consume a repair; after that snapshot is fixed and closeout reviews begin, at most one automatic repair pass is permitted
 Codex Runtime Adapter: CODEX-HOME-RUN-ISOLATION-07 - PASSED - DEVELOPMENT ONLY
 Codex Runtime Adapter closeout: CODEX-RUNTIME-ADAPTER-MVP-FINAL-CLOSEOUT-08 - PASSED - DEVELOPMENT ONLY

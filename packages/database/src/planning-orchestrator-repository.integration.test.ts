@@ -3,7 +3,7 @@ import { Pool } from "pg";
 import { afterAll,beforeAll,describe,expect,it } from "vitest";
 import { canonicalAgentOperationDigest,FakeAgentRuntime,type AgentResult } from "@software-builder/agent-runtime";
 import type { PlanningJobResult,PlanningJobRole,PlanningResultOutcome,PlanningStatusView } from "@software-builder/workflow-engine";
-import { AgentJobRepository,HmacCapabilityAuthority,PostgresDatabase,PostgresPlanningOrchestratorRepository,PostgresProjectContextIssuer } from "./index.js";
+import { AgentJobRepository,HmacCapabilityAuthority,PostgresDatabase,PostgresPlanningOrchestratorRepository,PostgresProjectContextIssuer,createAgentJobCompletionContext } from "./index.js";
 import { migrate,resetDatabase } from "./migrations.js";
 
 const adminUrl=process.env.TEST_DATABASE_URL;
@@ -39,7 +39,7 @@ describe("Planning Orchestrator PostgreSQL integration",()=>{
     const claim=await runtimeJobs.claimNext(`planning-worker-${role.toLowerCase()}`,`claim-${randomUUID()}`,120_000);if(!claim||claim.jobId!==planningJob.backgroundJobId)throw new Error(`Unexpected runtime claim for ${role}`);
     const command={runId:claim.task.runId,projectId:claim.projectId,taskId:claim.task.taskId,attemptId:claim.task.attemptId,idempotencyKey:`start-${claim.jobId}-${claim.fencingToken}`,requestDigest:canonicalAgentOperationDigest("startRun",claim.task),fencingToken:claim.fencingToken,task:claim.task};
     const runtime=(await new FakeAgentRuntime({now:()=>new Date("2026-07-15T12:00:00.000Z")}).startRun(command)).result;if(!runtime)throw new Error("Fake runtime did not produce a result");
-    await runtimeJobs.complete({jobId:claim.jobId,workerId:claim.workerId,claimId:claim.claimId,fencingToken:claim.fencingToken},runtime,randomUUID());
+    await runtimeJobs.complete(createAgentJobCompletionContext(claim),runtime);
     const resultId=(await admin.query<{agent_result_id:string}>("SELECT agent_result_id FROM builder.background_jobs WHERE id=$1",[claim.jobId])).rows[0]!.agent_result_id;
     return planningResult(planningJob.id,resultId,status.projectRevision,runtime);
   }
