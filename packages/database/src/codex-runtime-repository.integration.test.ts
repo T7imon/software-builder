@@ -23,6 +23,7 @@ import {
   AgentJobRepository,
   PostgresCodexRuntimeRepository,
   PostgresPlanningOrchestratorRepository,
+  createAgentJobCompletionContext,
 } from "./index.js";
 import { migrate, resetDatabase } from "./migrations.js";
 
@@ -124,11 +125,7 @@ describe("Codex Exec runtime PostgreSQL integration", () => {
       task: claim.task,
     })).result;
     if (!result) throw new Error("Fake setup runtime produced no planning result");
-    await runtimeJobs.complete(
-      { jobId: claim.jobId, workerId: claim.workerId, claimId: claim.claimId, fencingToken: claim.fencingToken },
-      result,
-      randomUUID(),
-    );
+    await runtimeJobs.complete(createAgentJobCompletionContext(claim), result);
     const runtimeResultId = (await admin.query<{ agent_result_id: string }>(
       "SELECT agent_result_id FROM builder.background_jobs WHERE id=$1",
       [claim.jobId],
@@ -300,6 +297,11 @@ describe("Codex Exec runtime PostgreSQL integration", () => {
     };
   }
 
+  async function completionContext(claim: NonNullable<Awaited<ReturnType<AgentJobRepository["claimNext"]>>>) {
+    const current = await runtimeJobs.loadClaim({ jobId: claim.jobId, workerId: claim.workerId, claimId: claim.claimId, fencingToken: claim.fencingToken });
+    return createAgentJobCompletionContext(current);
+  }
+
   function failureResult(
     claim: NonNullable<Awaited<ReturnType<AgentJobRepository["claimNext"]>>>,
   ): AgentResult {
@@ -348,16 +350,7 @@ describe("Codex Exec runtime PostgreSQL integration", () => {
       { error_code: null, policy_event: null },
       { error_code: null, policy_event: null },
     ]);
-    await runtimeJobs.complete(
-      {
-        jobId: value.claim.jobId,
-        workerId: value.claim.workerId,
-        claimId: value.claim.claimId,
-        fencingToken: value.claim.fencingToken,
-      },
-      successResult(value.claim),
-      randomUUID(),
-    );
+    await runtimeJobs.complete(await completionContext(value.claim), successResult(value.claim));
     await expect(
       admin.query("UPDATE builder.codex_exec_runs SET model='tampered' WHERE job_id=$1", [value.claim.jobId]),
     ).rejects.toThrow(/transition is invalid or terminal/);
@@ -416,16 +409,7 @@ describe("Codex Exec runtime PostgreSQL integration", () => {
       },
     });
     expect(recovered).toMatchObject({ action: "RECOVERY_REQUIRED", run: { state: "RECOVERY_REQUIRED" } });
-    await runtimeJobs.complete(
-      {
-        jobId: reclaimed.jobId,
-        workerId: reclaimed.workerId,
-        claimId: reclaimed.claimId,
-        fencingToken: reclaimed.fencingToken,
-      },
-      failureResult(reclaimed),
-      randomUUID(),
-    );
+    await runtimeJobs.complete(await completionContext(reclaimed), failureResult(reclaimed));
   }, 30_000);
 
   it("replays a terminal Codex ledger after process restart without reserving a second turn", async () => {
@@ -475,16 +459,7 @@ describe("Codex Exec runtime PostgreSQL integration", () => {
       "SELECT count(*) count FROM builder.codex_exec_audit_events WHERE job_id=$1 AND event_type='START_RESERVED'",
       [value.claim.jobId],
     )).rows[0]!.count)).toBe(1);
-    await runtimeJobs.complete(
-      {
-        jobId: reclaimed.jobId,
-        workerId: reclaimed.workerId,
-        claimId: reclaimed.claimId,
-        fencingToken: reclaimed.fencingToken,
-      },
-      successResult(reclaimed),
-      randomUUID(),
-    );
+    await runtimeJobs.complete(await completionContext(reclaimed), successResult(reclaimed));
   }, 30_000);
 
   it("persists only a non-authoritative Codex cancellation ledger under the exact active cancellation fence", async () => {

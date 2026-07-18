@@ -23,6 +23,7 @@ import {
   PostgresCodexRuntimeRepository,
   PostgresPlanningOrchestratorRepository,
   PostgresWorkspaceRegistrationStore,
+  createAgentJobCompletionContext,
   migrate,
   resetDatabase,
 } from "@software-builder/database";
@@ -261,11 +262,7 @@ describe.skipIf(!enabled)("real Codex Exec PLANNER smoke", () => {
         task: claim.task,
       })).result;
       if (!result) throw new Error("Fake smoke setup runtime produced no result");
-      await runtimeJobs.complete(
-        { jobId: claim.jobId, workerId: claim.workerId, claimId: claim.claimId, fencingToken: claim.fencingToken },
-        result,
-        randomUUID(),
-      );
+      await runtimeJobs.complete(createAgentJobCompletionContext(claim), result);
       const runtimeResultId = (await admin.query<{ agent_result_id: string }>(
         "SELECT agent_result_id FROM builder.background_jobs WHERE id=$1",
         [claim.jobId],
@@ -433,7 +430,8 @@ describe.skipIf(!enabled)("real Codex Exec PLANNER smoke", () => {
     expect(status).toMatchObject({ state: "SUCCEEDED", terminal: true, result: { status: "SUCCESS" } });
     if (!status.result) throw new Error("Real Codex smoke returned no structured result");
     await store.persistProgress(status);
-    await runtimeJobs.complete(store.guard(), status.result, randomUUID());
+    const completionClaim = await runtimeJobs.loadClaim(store.guard());
+    await runtimeJobs.complete(createAgentJobCompletionContext(completionClaim), status.result);
 
     expect(launcher.specs).toHaveLength(1);
     expect(launcher.specs[0]!.executable).toBe(process.execPath);

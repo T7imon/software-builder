@@ -23,6 +23,7 @@ import {
   PostgresDatabase,
   PostgresPlanningOrchestratorRepository,
   PostgresProjectContextIssuer,
+  createAgentJobCompletionContext,
 } from "./index.js";
 import { migrate, resetDatabase } from "./migrations.js";
 
@@ -154,7 +155,7 @@ describe("Project Workspace PostgreSQL integration", () => {
     };
     const result = (await new FakeAgentRuntime().startRun(command)).result;
     if (!result) throw new Error("Fake runtime produced no workspace planning result");
-    await runtimeJobs.complete({ jobId: claim.jobId, workerId: claim.workerId, claimId: claim.claimId, fencingToken: claim.fencingToken }, result, randomUUID());
+    await runtimeJobs.complete(createAgentJobCompletionContext(claim), result);
     const runtimeResultId = (await admin.query<{ agent_result_id: string }>("SELECT agent_result_id FROM builder.background_jobs WHERE id=$1", [claim.jobId])).rows[0]!.agent_result_id;
     return planningResult(job.id, runtimeResultId, status.projectRevision, result);
   }
